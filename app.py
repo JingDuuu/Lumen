@@ -116,7 +116,7 @@ def favicon():
 @app.route("/api/system")
 def api_system():
     running = core.comfyui_running()
-    info = {"comfyui_running": running, "version": "4.1.0", "desktop": bool(app.config.get("DESKTOP_CLOSE")),
+    info = {"comfyui_running": running, "version": "4.1.1", "desktop": bool(app.config.get("DESKTOP_CLOSE")),
             "model": "MiniMax H3 · FL2VA / Ref2VA INT8", "capabilities": tasks.CAPABILITIES, "models": core.model_status(),
             "progress_connected": tasks.manager.ready.is_set(), "engine": engine_runtime.state()}
     if running:

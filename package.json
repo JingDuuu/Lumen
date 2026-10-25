@@ -1,6 +1,6 @@
 {
   "name": "lumen-previs",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "private": true,
   "description": "Browser acceptance tooling for the local Lumen desktop app",
   "license": "MIT",

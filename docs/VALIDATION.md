@@ -1,5 +1,7 @@
 # 4.1.0 validation — 2026-10-26
 
+Patch 4.1.1 normalizes Windows 8.3 temporary-directory aliases in installation tests; application workflows are unchanged.
+
 Evidence below distinguishes measured behavior from untested combinations. Tests use temporary data and synthetic references. The public repository does not contain private boards, output videos or raw local diagnostic logs.
 
 ## Checked locally

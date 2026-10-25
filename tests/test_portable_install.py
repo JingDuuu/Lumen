@@ -38,7 +38,7 @@ class Response:
 class PortableTests(unittest.TestCase):
     def test_new_checkout_defaults_are_inside_project(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
+            root = Path(folder).resolve()
             config = load_config(root, {})
             self.assertEqual(config.comfy_dir, root / 'runtime/ComfyUI')
             self.assertEqual(config.data_dir, root / 'data')
@@ -46,7 +46,7 @@ class PortableTests(unittest.TestCase):
 
     def test_legacy_paths_are_preserved(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
+            root = Path(folder).resolve()
             (root / 'main.py').touch()
             (root / 'comfy').mkdir()
             studio = root / 'studio'
@@ -59,7 +59,7 @@ class PortableTests(unittest.TestCase):
 
     def test_local_config_relative_paths_and_environment_override(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
+            root = Path(folder).resolve()
             (root / 'lumen.local.json').write_text(json.dumps({'comfy_dir':'my-engine','data_dir':'my-data'}))
             config = load_config(root, {'LUMEN_DATA_DIR':str(root / 'override')})
             self.assertEqual(config.comfy_dir, root / 'my-engine')
