@@ -1,0 +1,38 @@
+[
+  {
+    "file": "autumn_field_puresky_1k.hdr",
+    "width": 1024,
+    "height": 512,
+    "minimum": 0.021484375,
+    "maximum": 123904.0,
+    "decoded_pixels": 524288,
+    "finite": true
+  },
+  {
+    "file": "kloofendal_48d_partly_cloudy_1k.hdr",
+    "width": 1024,
+    "height": 512,
+    "minimum": 0.00244140625,
+    "maximum": 54272.0,
+    "decoded_pixels": 524288,
+    "finite": true
+  },
+  {
+    "file": "studio_small_09_1k.hdr",
+    "width": 1024,
+    "height": 512,
+    "minimum": 0.0,
+    "maximum": 524.0,
+    "decoded_pixels": 524288,
+    "finite": true
+  },
+  {
+    "file": "venice_sunset_1k.hdr",
+    "width": 1024,
+    "height": 512,
+    "minimum": 0.0,
+    "maximum": 6464.0,
+    "decoded_pixels": 524288,
+    "finite": true
+  }
+]

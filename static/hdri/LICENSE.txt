@@ -1,0 +1,6 @@
+Poly Haven HDRI assets: CC0 1.0 Universal.
+These four HDR images may be used, modified and redistributed, including commercially.
+Source and author details are in provenance.json. No Poly Haven logos or example renders are included.
+https://polyhaven.com/license
+https://creativecommons.org/publicdomain/zero/1.0/
+These are locally hosted copies. Lumen makes no runtime request to Poly Haven.

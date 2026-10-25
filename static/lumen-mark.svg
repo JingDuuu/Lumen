@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="base" x1="30" y1="12" x2="230" y2="250" gradientUnits="userSpaceOnUse"><stop stop-color="#20394e"/><stop offset=".48" stop-color="#101a33"/><stop offset="1" stop-color="#111225"/></linearGradient>
+    <linearGradient id="glass" x1="62" y1="42" x2="192" y2="220" gradientUnits="userSpaceOnUse"><stop stop-color="#fff" stop-opacity=".97"/><stop offset=".38" stop-color="#b6efff" stop-opacity=".83"/><stop offset=".72" stop-color="#aabaff" stop-opacity=".58"/><stop offset="1" stop-color="#e6e6ff" stop-opacity=".94"/></linearGradient>
+    <linearGradient id="edge" x1="60" y1="40" x2="214" y2="220" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset=".42" stop-color="#c5f9ff" stop-opacity=".45"/><stop offset="1" stop-color="#c3baff" stop-opacity=".9"/></linearGradient>
+    <radialGradient id="bloom"><stop stop-color="#75dfff" stop-opacity=".33"/><stop offset="1" stop-color="#75dfff" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="9" stdDeviation="9" flood-color="#04091b" flood-opacity=".45"/></filter>
+    <clipPath id="clip"><rect x="8" y="8" width="240" height="240" rx="54"/></clipPath>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#base)"/>
+  <g clip-path="url(#clip)"><ellipse cx="72" cy="40" rx="150" ry="130" fill="url(#bloom)"/><path d="M12 60C72 12 174 12 244 50" stroke="#daefff" stroke-opacity=".13" stroke-width="44"/></g>
+  <rect x="8.75" y="8.75" width="238.5" height="238.5" rx="53.25" stroke="url(#edge)" stroke-opacity=".35" stroke-width="1.5"/>
+  <g filter="url(#shadow)">
+    <path d="M74 56C67.4 56 62 61.4 62 68V181C62 190.4 69.6 198 79 198H183C189.6 198 195 192.6 195 186V168H96V56H74Z" fill="url(#glass)"/>
+    <path d="M97 88H169V160H137V120H97V88Z" fill="url(#glass)" opacity=".76"/>
+    <path d="M74 56C67.4 56 62 61.4 62 68V181C62 190.4 69.6 198 79 198H183C189.6 198 195 192.6 195 186V168H96V56H74Z" stroke="url(#edge)" stroke-width="1.7"/>
+    <path d="M97 88H169V160H137V120H97" stroke="url(#edge)" stroke-width="1.5"/>
+    <path d="M69 69V180C69 185.5 73.5 190 79 190H182" stroke="#fff" stroke-opacity=".3" stroke-width="2" stroke-linecap="round"/>
+  </g>
+  <circle cx="187" cy="69" r="5" fill="#d4faff"/>
+  <circle cx="187" cy="69" r="11" stroke="#d4faff" stroke-opacity=".15"/>
+</svg>

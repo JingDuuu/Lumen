@@ -1,0 +1,8 @@
+{
+  "expected_revision":"REPLACE_WITH_REVISION_FROM_BOARD_GET",
+  "request_id":"example-add-coast-note-v1",
+  "operations":[
+    {"op":"add_item","value":{"id":"agent-coast-note","kind":"text","role":"style","content":"Soft evening light, restrained blue and amber colors.","x":800,"y":40,"w":320,"h":220}},
+    {"op":"set_params","value":{"seed":0}}
+  ]
+}

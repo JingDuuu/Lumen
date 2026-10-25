@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lumen:agent:v1",
+  "title": "Lumen local agent contracts",
+  "description": "Named definitions for HTTP payloads. Runtime validation additionally checks media existence, model compatibility, hierarchy and resource limits. Extension metadata is preserved.",
+  "$ref": "#/$defs/Board",
+  "$defs": {
+    "Id": {"type":"string","minLength":1,"maxLength":200},
+    "Vector3": {"type":"array","minItems":3,"maxItems":3,"items":{"type":"number"}},
+    "Quaternion": {"type":"array","minItems":4,"maxItems":4,"items":{"type":"number"}},
+    "Params": {
+      "type":"object",
+      "properties": {
+        "resolution":{"oneOf":[{"type":"string","pattern":"^[0-9]+,[0-9]+$"},{"type":"array","minItems":2,"maxItems":2,"items":{"type":"integer","minimum":256,"maximum":1344,"multipleOf":32}}]},
+        "duration":{"type":"number","minimum":2,"maximum":12},
+        "steps":{"type":"integer","minimum":6,"maximum":40},
+        "seed":{"type":"integer","minimum":0,"maximum":18446744073709551615},
+        "model_mode":{"enum":["auto","fl2va","ref2va"]}
+      }
+    },
+    "Item": {
+      "type":"object","required":["id","kind","role"],
+      "properties": {
+        "id":{"$ref":"#/$defs/Id"},"kind":{"enum":["text","image","video"]},
+        "role":{"type":"string","description":"text: char/scene/action/camera/audio/style/layout/storyboard/extra; media: reference/auto/first_frame/last_frame/middle_frame_1/2/3"},
+        "content":{"type":"string","maxLength":20000},"file":{"type":"string","description":"Exact name returned by POST /api/upload; never an external URL or filesystem path"},
+        "enabled":{"type":"boolean","default":true},"zone_id":{"type":["string","null"]},
+        "reference_role":{"enum":["character","scene","action","camera","style","layout","storyboard","audio","general"]},
+        "character_view":{"enum":["general","front","side","back","three_view","detail"]},
+        "notes":{"type":"string","maxLength":20000},"description":{"type":"string","maxLength":20000},
+        "x":{"type":"number"},"y":{"type":"number"},"w":{"type":"number","exclusiveMinimum":0},"h":{"type":"number","exclusiveMinimum":0},
+        "video_start":{"type":"number","minimum":0},"video_duration":{"type":"number","exclusiveMinimum":0},"include_audio":{"type":"boolean"},
+        "shot_order":{"type":"integer","minimum":1,"maximum":100},"layout":{"type":"object"}
+      },
+      "allOf":[{"if":{"properties":{"kind":{"const":"text"}}},"then":{"required":["content"],"properties":{"role":{"enum":["char","scene","action","camera","audio","style","layout","storyboard","extra"]}}},"else":{"required":["file"]}}]
+    },
+    "Zone": {
+      "type":"object","required":["id"],
+      "properties":{"id":{"$ref":"#/$defs/Id"},"name":{"type":"string","maxLength":2000},"purpose":{"enum":["character","scene","action","camera","style","layout","storyboard","audio","general","free"]},"notes":{"type":"string","maxLength":2000},"x":{"type":"number"},"y":{"type":"number"},"w":{"type":"number","exclusiveMinimum":0},"h":{"type":"number","exclusiveMinimum":0},"collapsed":{"type":"boolean"},"slot":{"type":"integer","minimum":0}}
+    },
+    "Connection": {
+      "type":"object","required":["id","from","to"],
+      "properties":{"id":{"$ref":"#/$defs/Id"},"from":{"$ref":"#/$defs/Id"},"to":{"$ref":"#/$defs/Id"},"label":{"type":"string","maxLength":2000,"description":"reference/character_consistency/style_inherit/action_reference/camera/continuation/association or explicit semantic prose"}}
+    },
+    "Board": {
+      "type":"object","required":["items","params"],
+      "properties":{"items":{"type":"array","maxItems":100,"items":{"$ref":"#/$defs/Item"}},"params":{"$ref":"#/$defs/Params"},"connections":{"type":"array","maxItems":1000,"items":{"$ref":"#/$defs/Connection"}},"zones":{"type":"array","maxItems":100,"items":{"$ref":"#/$defs/Zone"}},"viewport":{"type":"object"},"confirm_expensive":{"type":"boolean"}}
+    },
+    "BoardWrite": {
+      "type":"object","required":["board","expected_revision"],
+      "properties":{"board":{"$ref":"#/$defs/Board"},"expected_revision":{"type":"string"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9_.:-]{1,160}$"}}
+    },
+    "BoardOperations": {
+      "type":"object","required":["expected_revision","operations"],
+      "properties":{"expected_revision":{"type":"string"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9_.:-]{1,160}$"},"operations":{"type":"array","minItems":1,"maxItems":500,"items":{"type":"object","required":["op"],"properties":{"op":{"enum":["add_item","update_item","remove_item","add_zone","update_zone","remove_zone","add_connection","update_connection","remove_connection","set_params","set_viewport"]},"id":{"$ref":"#/$defs/Id"},"value":{"type":"object"}}}}}
+    },
+    "Keyframe": {"type":"object","required":["time","value"],"properties":{"id":{"$ref":"#/$defs/Id"},"time":{"type":"number","minimum":0,"maximum":300},"value":{},"interpolation":{"enum":["linear","smooth","step"]}}},
+    "Track": {"type":"object","required":["targetId","property","keys"],"properties":{"id":{"$ref":"#/$defs/Id"},"targetId":{"$ref":"#/$defs/Id"},"property":{"type":"string","description":"Catalog timeline_properties root, optionally dot-separated child fields; no prototype/constructor paths"},"interpolation":{"enum":["linear","smooth","step"]},"muted":{"type":"boolean"},"keys":{"type":"array","maxItems":10000,"items":{"$ref":"#/$defs/Keyframe"}}}},
+    "SceneObject": {
+      "type":"object","required":["id","type"],
+      "properties":{"id":{"$ref":"#/$defs/Id"},"type":{"type":"string","description":"Catalog asset id, group, imported, camera, point_light, spot_light or directional_light"},"label":{"type":"string"},"parentId":{"type":["string","null"]},"position":{"$ref":"#/$defs/Vector3"},"rotation":{"$ref":"#/$defs/Vector3"},"scale":{"$ref":"#/$defs/Vector3"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"pose":{"type":"object"},"body":{"type":"object"},"hands":{"type":"object"},"face":{"type":"object"},"ik":{"type":"object"},"material":{"type":"object"},"modelURI":{"type":"string"}}
+    },
+    "Scene": {
+      "type":"object","required":["version","objects"],
+      "properties":{"version":{"const":3},"name":{"type":"string"},"objects":{"type":"array","maxItems":200,"items":{"$ref":"#/$defs/SceneObject"}},"camera":{"type":"object","properties":{"position":{"$ref":"#/$defs/Vector3"},"quaternion":{"$ref":"#/$defs/Quaternion"},"focal":{"type":"number","minimum":12,"maximum":300},"rail":{"type":"object"}}},"environment":{"type":"object"},"viewport":{"type":"object"},"sequence":{"type":"object","properties":{"duration":{"type":"number","minimum":1,"maximum":300},"fps":{"type":"number","minimum":1,"maximum":60},"tracks":{"type":"array","items":{"$ref":"#/$defs/Track"}}}}}
+    },
+    "Document": {"type":"object","required":["name","kind","scene"],"properties":{"id":{"type":"string","pattern":"^[a-f0-9]{32}$"},"name":{"type":"string","minLength":1,"maxLength":160},"kind":{"enum":["scene","template","prefab"]},"scene":{"$ref":"#/$defs/Scene"}}},
+    "DocumentWrite": {"type":"object","required":["document","request_id"],"properties":{"document":{"$ref":"#/$defs/Document"},"request_id":{"type":"string","pattern":"^[A-Za-z0-9_.:-]{1,160}$"},"expected_revision":{"type":"string"}}},
+    "AssetPreset": {"type":"object","required":["name","category","items","connections"],"properties":{"name":{"type":"string"},"category":{"enum":["character","scene","action","camera","style","general"]},"description":{"type":"string"},"items":{"type":"array","maxItems":100,"items":{"$ref":"#/$defs/Item"}},"connections":{"type":"array","items":{"$ref":"#/$defs/Connection"}},"zones":{"type":"array","items":{"$ref":"#/$defs/Zone"}},"params":{"$ref":"#/$defs/Params"}}}
+  }
+}

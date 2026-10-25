@@ -1,0 +1,914 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Lumen · 流光视频工作室</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/style.css?v=20261025-spatial" />
+    <link rel="stylesheet" href="/static/layout.css?v=20261025" />
+    <link rel="stylesheet" href="/static/preset-library.css?v=20261026" />
+    <link rel="stylesheet" href="/static/model-setup.css?v=20261026-portable" />
+    <script src="/static/app.js?v=20261025-spatial" defer></script>
+    <script type="importmap">
+      { "imports": { "three": "/static/vendor/three/three.module.js" } }
+    </script>
+    <script type="module" src="/static/layout.js?v=20261025-spatial"></script>
+    <script type="module" src="/static/preset-library.js?v=20261026"></script>
+    <script src="/static/model-setup.js?v=20261026-portable" defer></script>
+  </head>
+  <body>
+    <svg
+      class="icon-definitions"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <defs>
+        <symbol id="icon-board" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="7" height="9" rx="1.5" />
+          <rect x="14" y="3" width="7" height="5" rx="1.5" />
+          <rect x="3" y="16" width="7" height="5" rx="1.5" />
+          <rect x="14" y="12" width="7" height="9" rx="1.5" />
+        </symbol>
+        <symbol id="icon-library" viewBox="0 0 24 24">
+          <rect x="4" y="7" width="16" height="14" rx="2" />
+          <path d="M7 3h10M5 5h14m-3 9-6-3v6l6-3Z" />
+        </symbol>
+        <symbol id="icon-tasks" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3.5 2.5" />
+        </symbol>
+        <symbol id="icon-info" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v6m0-10v.1" />
+        </symbol>
+        <symbol id="icon-plus" viewBox="0 0 24 24">
+          <path d="M12 5v14M5 12h14" />
+        </symbol>
+        <symbol id="icon-minus" viewBox="0 0 24 24">
+          <path d="M5 12h14" />
+        </symbol>
+        <symbol id="icon-text" viewBox="0 0 24 24">
+          <path d="M4 6V4h16v2M12 4v16m-4 0h8" />
+        </symbol>
+        <symbol id="icon-image" viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="18" rx="3" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <path d="m21 15-5-5L5 21" />
+        </symbol>
+        <symbol id="icon-video" viewBox="0 0 24 24">
+          <rect x="3" y="5" width="13" height="14" rx="2.5" />
+          <path d="m16 10 5-3v10l-5-3" />
+        </symbol>
+        <symbol id="icon-undo" viewBox="0 0 24 24">
+          <path
+            d="m8 5-5 5 5 5M3 10h11a6 6 0 0 1 0 12"
+            transform="translate(0 -2)"
+          />
+        </symbol>
+        <symbol id="icon-redo" viewBox="0 0 24 24">
+          <path
+            d="m16 5 5 5-5 5m5-5H10a6 6 0 0 0 0 12"
+            transform="translate(0 -2)"
+          />
+        </symbol>
+        <symbol id="icon-trash" viewBox="0 0 24 24">
+          <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" />
+        </symbol>
+        <symbol id="icon-arrange" viewBox="0 0 24 24">
+          <path d="M3 3h18M3 21h18" />
+          <rect x="4" y="7" width="6" height="10" rx="1.5" />
+          <rect x="14" y="7" width="6" height="10" rx="1.5" />
+        </symbol>
+        <symbol id="icon-link" viewBox="0 0 24 24">
+          <path
+            d="m10 14 4-4m-6 7-1 1a4.2 4.2 0 0 1-6-6l4-4a4.2 4.2 0 0 1 6 0m2-1 1-1a4.2 4.2 0 0 1 6 6l-4 4a4.2 4.2 0 0 1-6 0"
+            transform="translate(1 0)"
+          />
+        </symbol>
+        <symbol id="icon-fit" viewBox="0 0 24 24">
+          <path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
+          <rect x="8" y="8" width="8" height="8" rx="1" />
+        </symbol>
+        <symbol id="icon-shuffle" viewBox="0 0 24 24">
+          <path
+            d="M3 6h3c5 0 7 12 12 12h3m-4-4 4 4-4 4M3 18h3c1.7 0 3-1.4 4.2-3.3M14 9c1.2-1.8 2.4-3 4-3h3m-4-4 4 4-4 4"
+          />
+        </symbol>
+        <symbol id="icon-search" viewBox="0 0 24 24">
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="m16 16 5 5" />
+        </symbol>
+        <symbol id="icon-star" viewBox="0 0 24 24">
+          <path
+            d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9L12 3Z"
+          />
+        </symbol>
+        <symbol id="icon-play" viewBox="0 0 24 24">
+          <path d="m8 4 12 8-12 8V4Z" />
+        </symbol>
+        <symbol id="icon-refresh" viewBox="0 0 24 24">
+          <path
+            d="M20 8a8 8 0 0 0-14-3L3 8m0-5v5h5M4 16a8 8 0 0 0 14 3l3-3m0 5v-5h-5"
+          />
+        </symbol>
+        <symbol id="icon-close" viewBox="0 0 24 24">
+          <path d="m6 6 12 12M6 18 18 6" />
+        </symbol>
+        <symbol id="icon-copy" viewBox="0 0 24 24">
+          <rect x="8" y="8" width="13" height="13" rx="2" />
+          <path d="M16 4V3H3v13h1" />
+        </symbol>
+        <symbol id="icon-folder" viewBox="0 0 24 24">
+          <path d="M3 7V4h6l3 3h9v13H3V7Z" />
+        </symbol>
+        <symbol id="icon-arrow-up-right" viewBox="0 0 24 24">
+          <path d="M6 18 18 6M6 6h12v12" />
+        </symbol>
+        <symbol id="icon-keyboard" viewBox="0 0 24 24">
+          <rect x="2" y="5" width="20" height="14" rx="3" />
+          <path
+            d="M6 9h.1m3.9 0h.1m3.9 0h.1m3.9 0h.1M6 13h.1m3.9 0h.1m3.9 0h.1m3.9 0h.1M8 16h8"
+          />
+        </symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24">
+          <path d="m5 12 4 4L19 6" />
+        </symbol>
+        <symbol id="icon-shield" viewBox="0 0 24 24">
+          <path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z" />
+          <path d="m8 12 3 3 5-6" />
+        </symbol>
+        <symbol id="icon-chevron-right" viewBox="0 0 24 24">
+          <path d="m9 5 7 7-7 7" />
+        </symbol>
+      </defs>
+    </svg>
+    <header class="app-header">
+      <a class="brand" href="/" aria-label="Lumen 流光首页"
+        ><span class="brand-mark" aria-hidden="true"
+          ><img src="/static/lumen-mark.svg" alt="" /></span
+        ><span class="brand-wordmark"
+          >Lumen<small>流光 · 本地视频工作室</small></span
+        ></a
+      >
+      <div class="header-project">
+        <span class="project-dot"></span>我的创作画板<span
+          id="save-state"
+          role="status"
+          >正在读取草稿</span
+        >
+        <button id="board-conflict" class="btn" hidden>处理草稿冲突</button>
+      </div>
+      <button
+        class="engine-status"
+        id="system-info"
+        title="查看本地模型与设备"
+        aria-label="查看本地模型与设备"
+      >
+        <span id="engine-dot" class="status-dot"></span
+        ><span id="engine-text">正在连接</span
+        ><svg class="icon info-glyph" aria-hidden="true">
+          <use href="#icon-info" />
+        </svg>
+      </button>
+    </header>
+    <div class="app-shell">
+      <nav class="rail" aria-label="工作区">
+        <button
+          class="nav-item active"
+          data-page="board"
+          aria-current="page"
+          aria-label="创作画板"
+          title="创作画板"
+          data-tooltip="创作画板"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#icon-board" /></svg
+          ><span class="sr-only">创作画板</span>
+        </button>
+        <button
+          class="nav-item"
+          data-page="library"
+          aria-label="素材库"
+          title="素材库"
+          data-tooltip="素材库"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#icon-library" /></svg
+          ><span class="sr-only">素材库</span
+          ><span class="nav-count" id="library-count">0</span>
+        </button>
+        <button
+          class="nav-item"
+          data-page="tasks"
+          aria-label="生成任务"
+          title="生成任务"
+          data-tooltip="生成任务"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#icon-tasks" /></svg
+          ><span class="sr-only">生成任务</span
+          ><span class="nav-count" id="task-count">0</span>
+        </button>
+        <div class="rail-bottom">
+          <button
+            class="nav-item"
+            id="shortcuts-btn"
+            aria-label="快捷键与画板操作"
+            title="快捷键与画板操作"
+            data-tooltip="快捷键与操作"
+          >
+            <svg class="icon" aria-hidden="true">
+              <use href="#icon-keyboard" />
+            </svg>
+          </button>
+          <div
+            class="local-indicator"
+            title="本机运行，素材保留在电脑"
+            aria-label="本机运行，素材保留在电脑"
+          >
+            <svg class="icon" aria-hidden="true">
+              <use href="#icon-shield" /></svg
+            ><span class="local-light"></span>
+          </div>
+        </div>
+      </nav>
+      <main>
+        <section id="page-board" class="page board-page" aria-label="创作画板">
+          <div class="board-column">
+            <div class="page-heading">
+              <div class="workspace-title">
+                <h1>创作画板</h1>
+                <span class="workspace-note">分类参考，组织镜头</span>
+              </div>
+              <div
+                class="heading-actions"
+                role="toolbar"
+                aria-label="画板历史与整理"
+              >
+                <button
+                  class="icon-btn"
+                  id="undo-board"
+                  disabled
+                  title="撤销 · Ctrl+Z"
+                  aria-label="撤销"
+                  data-tooltip="撤销 · Ctrl+Z"
+                >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#icon-undo" />
+                  </svg>
+                </button>
+                <button
+                  class="icon-btn"
+                  id="redo-board"
+                  disabled
+                  title="重做 · Ctrl+Shift+Z"
+                  aria-label="重做"
+                  data-tooltip="重做 · Ctrl+Shift+Z"
+                >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#icon-redo" />
+                  </svg>
+                </button>
+                <span class="toolbar-divider"></span>
+                <button
+                  class="icon-btn"
+                  id="clear-board"
+                  title="清空画板，可撤销"
+                  aria-label="清空画板"
+                  data-tooltip="清空画板"
+                >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#icon-trash" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <nav
+              id="quadrant-nav"
+              class="quadrant-navigation"
+              aria-label="固定象限导航"
+            ></nav>
+            <div class="canvas-stage">
+              <div class="board-toolbar" role="toolbar" aria-label="画板工具">
+                <div class="tool-group">
+                  <button class="btn" id="add-text" title="添加文字卡片">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-text" /></svg
+                    >文字
+                  </button>
+                  <button
+                    class="btn"
+                    id="add-image"
+                    title="添加图片，可设为首帧或尾帧"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-image" /></svg
+                    >图片
+                  </button>
+                  <button class="btn" id="add-video" title="添加参考视频到画板">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-video" /></svg
+                    >视频
+                  </button>
+                </div>
+                <span class="toolbar-divider"></span>
+                <div class="tool-group workspace-tools">
+                  <button
+                    class="btn"
+                    id="add-zone"
+                    title="新增系统固定位置的自定义区域"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-board" /></svg
+                    >新增区域
+                  </button>
+                  <button
+                    class="btn"
+                    id="layout-open"
+                    title="布置人物、构图和机位"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-fit" /></svg
+                    >3D Layout
+                  </button>
+                </div>
+                <button
+                  class="btn"
+                  id="open-reference-presets"
+                  title="保存并调用角色、场景、动作参考"
+                >
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#icon-library" /></svg
+                  >参考预设
+                </button>
+                <label class="sr-only" for="preset-select"
+                  >添加镜头或风格预设</label
+                ><select
+                  id="preset-select"
+                  aria-label="添加镜头或风格预设"
+                  title="添加镜头、风格或音频预设"
+                >
+                  <option value="">选择预设…</option>
+                </select>
+                <div class="tool-group secondary-tools">
+                  <button
+                    class="btn organize-button"
+                    id="organize-board"
+                    title="在固定象限内按用途自动排卡，可撤销"
+                    aria-label="按用途收纳素材"
+                    data-tooltip="按用途收纳"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-folder" /></svg
+                    >自动排卡
+                  </button>
+                  <button
+                    class="icon-btn"
+                    id="connect-cards"
+                    title="连接选中卡片"
+                    aria-label="连接卡片"
+                    data-tooltip="连接卡片"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-link" />
+                    </svg>
+                  </button>
+                  <button
+                    class="btn"
+                    id="arrange-board"
+                    title="查看全部象限 · Home"
+                    aria-label="查看全部象限"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-fit" /></svg
+                    >全部象限
+                  </button>
+                </div>
+              </div>
+              <div
+                id="canvas"
+                tabindex="0"
+                aria-label="自由画板。拖动空白框选，空格加拖动平移，滚轮缩放，双击添加文字。"
+              >
+                <div id="world"></div>
+                <div id="board-empty" class="board-empty">
+                  <div class="frame-corners">
+                    <span>一个镜头，从这里开始</span>
+                  </div>
+                  <p>
+                    写下场景，放入首尾帧。<br />把脑海里的画面，摆在同一张桌上。
+                  </p>
+                  <button class="btn primary" id="empty-add">
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-plus" /></svg
+                    >写下第一个镜头</button
+                  ><small>也可以拖入图片、视频，或粘贴素材</small>
+                </div>
+                <div class="board-note">
+                  <span class="board-counts"
+                    ><span id="board-item-count">0 张卡片</span
+                    ><span id="selection-count" hidden></span></span
+                  ><span>拖动框选 · 空格拖动平移 · 滚轮缩放</span>
+                </div>
+              </div>
+            </div>
+            <div class="board-footer">
+              <span>单击选中 · 双击图片看原图 · 导航聚焦固定象限</span>
+              <div class="footer-actions">
+                <button id="show-inputs" class="text-btn">
+                  实际输入<svg class="icon" aria-hidden="true">
+                    <use href="#icon-arrow-up-right" />
+                  </svg>
+                </button>
+                <div class="zoom-tools">
+                  <button
+                    class="icon-btn"
+                    id="zoom-out"
+                    aria-label="缩小画板"
+                    title="缩小画板"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-minus" />
+                    </svg></button
+                  ><span id="zoom-label">100%</span
+                  ><button
+                    class="icon-btn"
+                    id="zoom-in"
+                    aria-label="放大画板"
+                    title="放大画板"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-plus" />
+                    </svg></button
+                  ><button
+                    class="icon-btn"
+                    id="fit-board"
+                    aria-label="适应全部卡片"
+                    title="适应全部卡片"
+                    data-tooltip="适应画板"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-fit" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <aside class="inspector" aria-label="镜头生成设置">
+            <div class="inspector-content">
+              <section
+                class="inspector-block connection-tools"
+                id="connection-tools"
+                hidden
+              >
+                <div class="section-title">
+                  <h2>卡片连线</h2>
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#icon-link" />
+                  </svg>
+                </div>
+                <label class="field-label" for="connection-label"
+                  >关联方式</label
+                ><select id="connection-label">
+                  <option value="reference">参考</option>
+                  <option value="association">关联</option>
+                  <option value="continuation">延续</option>
+                </select>
+                <p class="field-help">
+                  关联会作为创作指导写入提示词，可在实际输入预览中核对。
+                </p>
+                <button class="btn danger quiet" id="delete-connection">
+                  <svg class="icon" aria-hidden="true">
+                    <use href="#icon-trash" /></svg
+                  >移除连线
+                </button>
+              </section>
+              <section class="inspector-block selection-block">
+                <div class="section-title">
+                  <h2>选中卡片</h2>
+                  <span class="muted" id="selected-kind">—</span>
+                </div>
+                <p class="muted" id="selection-empty">
+                  点击卡片编辑，拖动标题移动，拖动右下角调整大小。
+                </p>
+                <div id="selection-tools" hidden>
+                  <label class="field-label" for="selected-role">输入角色</label
+                  ><select id="selected-role"></select>
+                  <p id="selected-help" class="field-help"></p>
+                  <div class="check-row selected-enabled-row">
+                    <input
+                      id="selected-enabled"
+                      type="checkbox"
+                      checked
+                    /><label for="selected-enabled">参与本次生成</label>
+                  </div>
+                  <label class="field-label" for="selected-zone">所在分区</label
+                  ><select
+                    id="selected-zone"
+                    aria-label="卡片所在分区"
+                  ></select>
+                  <div id="reference-fields" hidden>
+                    <label class="field-label" for="selected-reference-role"
+                      >参考用途</label
+                    ><select
+                      id="selected-reference-role"
+                      aria-label="参考素材用途"
+                    ></select>
+                    <div id="character-view-field" hidden>
+                      <label class="field-label" for="selected-character-view"
+                        >人物视图</label
+                      ><select
+                        id="selected-character-view"
+                        aria-label="人物参考视图"
+                      ></select>
+                    </div>
+
+                    <label class="field-label" for="selected-notes"
+                      >素材备注</label
+                    ><textarea
+                      id="selected-notes"
+                      rows="2"
+                      maxlength="20000"
+                      placeholder="例如：保持发型、服装和人物比例"
+                    ></textarea>
+                  </div>
+                  <div id="storyboard-fields" hidden>
+                    <label class="field-label" for="selected-shot-order"
+                      >分镜顺序 <span>留空按卡片顺序</span></label
+                    ><input
+                      id="selected-shot-order"
+                      type="number"
+                      min="1"
+                      max="100"
+                      step="1"
+                      placeholder="自动"
+                    />
+                  </div>
+                  <details id="video-fields" class="control-details" hidden>
+                    <summary>
+                      视频片段与声音<svg class="icon" aria-hidden="true">
+                        <use href="#icon-chevron-right" />
+                      </svg>
+                    </summary>
+                    <div class="parameter-grid">
+                      <label class="field-label"
+                        >起点 <span>秒</span
+                        ><input
+                          id="video-start"
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value="0" /></label
+                      ><label class="field-label"
+                        >片段时长 <span>秒</span
+                        ><input
+                          id="video-duration"
+                          type="number"
+                          min="0.21"
+                          max="15"
+                          step="0.01"
+                          value="2"
+                      /></label>
+                    </div>
+                    <div class="check-row">
+                      <input
+                        id="video-include-audio"
+                        type="checkbox"
+                        checked
+                      /><label for="video-include-audio"
+                        >使用参考片段的声音</label
+                      >
+                    </div>
+                  </details>
+                  <div class="selection-actions">
+                    <button class="btn" id="duplicate-card">
+                      <svg class="icon" aria-hidden="true">
+                        <use href="#icon-copy" /></svg
+                      >复制卡片</button
+                    ><button class="btn danger quiet" id="delete-card">
+                      <svg class="icon" aria-hidden="true">
+                        <use href="#icon-trash" /></svg
+                      >移除
+                    </button>
+                  </div>
+                  <button class="btn" id="save-reference-preset" disabled>
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-folder" /></svg
+                    >保存为参考预设
+                  </button>
+                </div>
+              </section>
+              <section class="inspector-block">
+                <div class="section-title">
+                  <h2>生成设置</h2>
+                  <span class="model-chip">MiniMax H3</span>
+                </div>
+                <label class="field-label" for="model-mode">输入方式</label
+                ><select id="model-mode">
+                  <option value="auto">自动选择 · 跟随素材</option>
+                  <option value="fl2va">首尾帧与引导帧 · FL2VA</option>
+                  <option value="ref2va">多参考素材 · Ref2VA</option>
+                </select>
+                <div class="mode-switch">
+                  <button id="quick-preset" class="active">
+                    快速试片<small>先验证画面与动作</small></button
+                  ><button id="quality-preset">
+                    细化镜头<small>5 秒 · 20 步</small>
+                  </button>
+                </div>
+                <label class="field-label" for="resolution">画面尺寸</label
+                ><select id="resolution">
+                  <option value="608,352">608 × 352 · 横向试片</option>
+                  <option value="352,608">352 × 608 · 竖向试片</option>
+                  <option value="512,512">512 × 512 · 方形</option>
+                  <option value="864,480">864 × 480 · 横向</option>
+                  <option value="480,864">480 × 864 · 竖向</option>
+                  <option value="1344,768">1344 × 768 · 高成本</option>
+                  <option value="768,1344">768 × 1344 · 高成本竖向</option>
+                </select>
+                <div class="parameter-grid">
+                  <label class="field-label"
+                    >时长 <span>秒</span
+                    ><input
+                      id="duration"
+                      type="number"
+                      min="2"
+                      max="12"
+                      step="0.5"
+                      value="2" /></label
+                  ><label class="field-label"
+                    >采样步数<input
+                      id="steps"
+                      type="number"
+                      min="6"
+                      max="40"
+                      step="1"
+                      value="8"
+                  /></label>
+                </div>
+                <label class="field-label" for="seed"
+                  >随机种子 <span>相同配置可复用</span></label
+                >
+                <div class="seed-row">
+                  <input
+                    id="seed"
+                    type="number"
+                    min="0"
+                    max="9007199254740991"
+                    step="1"
+                    value="888"
+                  /><button
+                    class="icon-btn"
+                    id="random-seed"
+                    aria-label="换一个随机种子"
+                    title="换一个随机种子"
+                    data-tooltip="换一个随机种子"
+                  >
+                    <svg class="icon" aria-hidden="true">
+                      <use href="#icon-shuffle" />
+                    </svg>
+                  </button>
+                </div>
+                <p class="field-help">
+                  首次载入模型可能较慢。快速试片的计算量较低，完成时间以实测为准。
+                </p>
+              </section>
+              <section class="inspector-block estimate-block">
+                <div class="section-title">
+                  <h2>生成前检查</h2>
+                  <span id="estimate-badge" class="muted">尚未检查</span>
+                </div>
+                <div id="estimate-detail">
+                  <p class="muted">先检查输入和计算规模，再开始生成。</p>
+                </div>
+                <div id="expensive-confirm" class="check-row" hidden>
+                  <input type="checkbox" id="confirm-expensive" /><label
+                    for="confirm-expensive"
+                    >已了解高计算成本，仍使用此配置</label
+                  >
+                </div>
+              </section>
+              <section
+                class="inspector-block current-task"
+                id="current-task-section"
+                hidden
+              >
+                <div class="section-title">
+                  <h2>当前任务</h2>
+                  <button class="text-btn" id="all-tasks">查看全部</button>
+                </div>
+                <div id="current-task"></div>
+              </section>
+            </div>
+            <div class="generate-dock">
+              <button
+                class="btn input-preview-btn"
+                id="preview-inputs"
+                title="检查真正传入模型的文字、图片、视频和声音"
+              >
+                <svg class="icon" aria-hidden="true">
+                  <use href="#icon-check" /></svg
+                >实际模型输入预览<svg
+                  class="icon trailing-icon"
+                  aria-hidden="true"
+                >
+                  <use href="#icon-chevron-right" />
+                </svg>
+              </button>
+              <button class="btn primary generate-btn" id="generate">
+                检查并预估
+              </button>
+              <p class="submit-note">成片、画板与配置，一起留在素材库。</p>
+            </div>
+          </aside>
+        </section>
+        <section
+          id="page-library"
+          class="page full-page"
+          aria-label="素材库"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">创作档案</p>
+              <h1>素材库</h1>
+              <p class="page-subtitle">播放成片，整理标签，回到当时的画板。</p>
+            </div>
+            <button class="btn" id="refresh-library">
+              <svg class="icon" aria-hidden="true">
+                <use href="#icon-refresh" /></svg
+              >刷新素材
+            </button>
+          </div>
+          <div class="library-toolbar">
+            <label class="search-box"
+              ><svg class="icon" aria-hidden="true">
+                <use href="#icon-search" /></svg
+              ><input
+                id="library-search"
+                type="search"
+                placeholder="搜索提示词、标签或记录编号"
+                aria-label="搜索素材" /></label
+            ><button class="btn" id="star-filter" aria-pressed="false">
+              <svg class="icon" aria-hidden="true">
+                <use href="#icon-star" /></svg
+              >仅看星标</button
+            ><label class="sr-only" for="library-status">素材状态</label
+            ><select id="library-status">
+              <option value="all">全部记录</option>
+              <option value="done">已完成</option>
+              <option value="other">未完成</option></select
+            ><span class="muted" id="library-summary"></span>
+          </div>
+          <div id="library-grid" class="library-grid"></div>
+        </section>
+        <section
+          id="page-tasks"
+          class="page full-page"
+          aria-label="生成任务"
+          hidden
+        >
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">生成进度</p>
+              <h1>生成任务</h1>
+              <p class="page-subtitle">
+                查看当前阶段、实际进展与预计剩余时间。
+              </p>
+            </div>
+            <button class="btn" id="refresh-tasks">
+              <svg class="icon" aria-hidden="true">
+                <use href="#icon-refresh" /></svg
+              >刷新状态
+            </button>
+          </div>
+          <div class="task-summary" id="task-summary"></div>
+          <div id="task-list" class="task-list"></div>
+        </section>
+      </main>
+    </div>
+    <input
+      id="file-picker"
+      type="file"
+      accept="image/*,video/*"
+      multiple
+      hidden
+    />
+    <dialog id="asset-dialog" class="asset-dialog">
+      <div class="dialog-top">
+        <span class="eyebrow">素材详情</span
+        ><button
+          class="icon-btn close-dialog"
+          aria-label="关闭素材详情"
+          title="关闭"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg>
+        </button>
+      </div>
+      <div class="asset-layout">
+        <div class="asset-preview">
+          <video
+            id="asset-video"
+            controls
+            playsinline
+            preload="metadata"
+          ></video>
+          <div id="asset-no-video" class="empty-state" hidden>
+            此记录还没有视频输出。<small>可以回填原配置后调整再生成。</small>
+          </div>
+        </div>
+        <div class="asset-details">
+          <h2 id="asset-title"></h2>
+          <div id="asset-meta" class="metadata"></div>
+          <p id="asset-error" class="warning" hidden></p>
+          <label class="field-label">提示词</label>
+          <pre id="asset-prompt"></pre>
+          <div class="section-title">
+            <label class="field-label" for="asset-tags">标签</label
+            ><button class="text-btn" id="save-tags">保存标签</button>
+          </div>
+          <input
+            id="asset-tags"
+            placeholder="用逗号分隔，例如：试片，海边"
+            type="text"
+          />
+          <div class="asset-actions">
+            <button class="btn primary" id="refill-asset">回填画板与配置</button
+            ><button class="btn" id="star-asset">
+              <svg class="icon" aria-hidden="true">
+                <use href="#icon-star" /></svg
+              >星标</button
+            ><button class="btn" id="open-asset">
+              <svg class="icon" aria-hidden="true">
+                <use href="#icon-folder" /></svg
+              >文件位置</button
+            ><button class="btn" id="copy-prompt">
+              <svg class="icon" aria-hidden="true">
+                <use href="#icon-copy" /></svg
+              >复制提示词
+            </button>
+          </div>
+          <p class="field-help">回填前会保存草稿，也可以用「撤销」返回。</p>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="image-dialog" class="image-preview-dialog">
+      <div class="dialog-top">
+        <div>
+          <h2 id="image-preview-title">原图预览</h2>
+          <p id="image-preview-meta"></p>
+        </div>
+        <button class="icon-btn close-dialog" aria-label="关闭原图预览">
+          <svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg>
+        </button>
+      </div>
+      <div class="image-preview-stage">
+        <img id="image-preview" alt="原图预览" />
+      </div>
+      <div class="image-preview-actions">
+        <button id="copy-original-image" class="btn primary">
+          <svg class="icon" aria-hidden="true"><use href="#icon-copy" /></svg
+          >复制原图</button
+        ><a id="download-original-image" class="btn" download>下载原图</a>
+        <p id="image-copy-status" role="status">
+          复制的是图片像素，可直接粘贴到其他软件。
+        </p>
+      </div>
+    </dialog>
+    <dialog id="info-dialog" class="info-dialog">
+      <div class="dialog-top">
+        <h2 id="info-title">本地工作室</h2>
+        <button
+          class="icon-btn close-dialog"
+          aria-label="关闭说明"
+          title="关闭"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg>
+        </button>
+      </div>
+      <div id="info-content"></div>
+    </dialog>
+    <dialog
+      id="layout-dialog"
+      class="layout-dialog"
+      aria-labelledby="layout-title"
+    >
+      <div class="dialog-top">
+        <div>
+          <p class="eyebrow">3D Layout</p>
+          <h2 id="layout-title">把镜头里的位置摆出来</h2>
+        </div>
+        <button
+          class="icon-btn"
+          data-close="layout-dialog"
+          aria-label="关闭构图编辑器"
+          title="关闭"
+        >
+          <svg class="icon" aria-hidden="true"><use href="#icon-close" /></svg>
+        </button>
+      </div>
+      <div id="layout-editor"></div>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

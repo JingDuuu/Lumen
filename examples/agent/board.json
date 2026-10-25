@@ -1,0 +1,10 @@
+{
+  "items": [
+    {"id":"coast-scene","kind":"text","role":"scene","content":"A fictional lighthouse on a quiet rocky coast at sunset.","x":40,"y":40,"w":320,"h":220},
+    {"id":"coast-camera","kind":"text","role":"camera","content":"A slow, stable camera push toward the lighthouse.","x":420,"y":40,"w":320,"h":220}
+  ],
+  "connections":[{"id":"camera-to-scene","from":"coast-camera","to":"coast-scene","label":"camera"}],
+  "zones":[],
+  "viewport":{"zoom":1,"panX":0,"panY":0},
+  "params":{"resolution":"608,352","duration":2,"steps":8,"seed":0,"model_mode":"auto"}
+}

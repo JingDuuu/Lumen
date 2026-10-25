@@ -1,0 +1,7 @@
+{
+  "comfy_dir": "runtime/ComfyUI",
+  "engine_python": ".venv/Scripts/python.exe",
+  "data_dir": "data",
+  "input_dir": "data/input",
+  "output_dir": "data/output"
+}

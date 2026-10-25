@@ -1,0 +1,18 @@
+{
+  "request_id":"example-animated-prefab-v1",
+  "document":{
+    "name":"Synthetic actor blocking",
+    "kind":"prefab",
+    "scene":{
+      "version":3,"name":"Synthetic actor blocking",
+      "objects":[
+        {"id":"example-actor","type":"adult_female","label":"Actor","position":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1],"face":{"mouthSmile":0.5,"eyeOpen":0.8},"material":{"color":"#6487a6","roughness":0.65,"metalness":0,"opacity":1}},
+        {"id":"example-chair","type":"chair","label":"Chair","position":[-1.5,0,0],"rotation":[0,20,0],"scale":[1,1,1]}
+      ],
+      "sequence":{"duration":3,"fps":24,"tracks":[
+        {"id":"actor-move","targetId":"example-actor","property":"position","interpolation":"smooth","keys":[{"id":"start","time":0,"value":[0,0,0]},{"id":"end","time":3,"value":[1.5,0,0]}]},
+        {"id":"actor-expression","targetId":"example-actor","property":"face.mouthSmile","interpolation":"linear","keys":[{"id":"neutral","time":0,"value":0},{"id":"smile","time":3,"value":0.8}]}
+      ]}
+    }
+  }
+}

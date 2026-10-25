@@ -1,0 +1,12 @@
+{
+  "name": "lumen-previs",
+  "version": "4.1.0",
+  "private": true,
+  "description": "Browser acceptance tooling for the local Lumen desktop app",
+  "license": "MIT",
+  "scripts": {
+    "test:scene": "node tests/layout_scene.mjs && node tests/layout_scene_edges.mjs && node tests/layout_assets.mjs && node tests/layout_rail.mjs",
+    "test:ui": "node tests/ui_interactions.cjs && node tests/ui_reference_zones.cjs && node tests/ui_layout.cjs && node tests/ui_previs_files.cjs && node tests/ui_preset_library.cjs && node tests/ui_model_setup.cjs"
+  },
+  "devDependencies": {"playwright": "1.62.1"}
+}
