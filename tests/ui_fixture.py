@@ -31,12 +31,26 @@ def main():
         backend.BOARD_FILE = str(root / "library/board-default.json")
         backend.app.config["PREVIS_ROOT"] = str(root / "library/previs")
         core.comfyui_running = lambda: False
+        core.model_status = lambda: {
+            "fl2va": {"name": core.MODEL_UNET, "available": True},
+            "ref2va": {"name": core.MODEL_REF, "available": True},
+        }
         backend.gpu_usage = lambda: None
         def forbid_engine(*args, **kwargs):
             raise AssertionError("UI acceptance must not start or submit to the model")
         core.start_comfyui = forbid_engine
         core.comfy_post = forbid_engine
         backend.start_services = forbid_engine
+        # Board/Previs tests represent a configured editor regardless of the host's
+        # actual model files. The dedicated onboarding test supplies missing models.
+        manifest = backend.model_manager.MANIFEST
+        backend.model_manager.installer.inventory = lambda: {
+            **manifest, "models": [dict(model, present=True, partial_bytes=0)
+                                   for model in manifest["models"]],
+            "models_dir": str(root / "models"), "free_bytes": 200 * 1024**3,
+            "engine_installed": True, "paths": {}, "job": {"stage": "idle", "active": False},
+        }
+        backend.model_manager.installer.start = forbid_engine
         Image.new("RGB", (320, 180), (56, 75, 85)).save(root / "input/fixture.png")
         board = {
             "items": [
