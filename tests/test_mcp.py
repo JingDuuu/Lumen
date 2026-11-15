@@ -126,7 +126,7 @@ class McpTests(unittest.TestCase):
             with patch.object(lumen, "request_json", return_value=output):
                 result = self.call("lumen_result", {"record_id": "abc"})["result"]
                 self.assertEqual(result["content"][1]["type"], "resource_link")
-                self.assertEqual(result["content"][1]["uri"], video.as_uri())
+                self.assertEqual(result["content"][1]["uri"], video.resolve().as_uri())
                 self.assertEqual(result["content"][1]["mimeType"], "video/mp4")
                 self.assertEqual(result["content"][1]["size"], 13)
                 self.assertNotIn("data", result["content"][1])

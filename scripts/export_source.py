@@ -2,6 +2,7 @@
 import argparse
 from pathlib import Path
 import shutil
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = {
@@ -34,6 +35,7 @@ def source_files():
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--destination', required=True, type=Path)
     args = parser.parse_args()
