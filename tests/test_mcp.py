@@ -367,7 +367,7 @@ class StdioHttpTests(unittest.TestCase):
         self.assertEqual(job["record_id"], "synthetic")
         self.assertEqual(json.loads(self.requests[-1][2]), payload)
         files = self.tool("lumen_result", {"record_id": "synthetic"})["result"]
-        self.assertEqual(files["content"][1]["uri"], self.video.as_uri())
+        self.assertEqual(files["content"][1]["uri"], self.video.resolve().as_uri())
         conflict = self.tool("lumen_board_apply", {"expected_revision": "old", "request_id": "once", "operations": []})["result"]
         self.assertTrue(conflict["isError"])
         self.assertEqual(conflict["structuredContent"]["code"], "REVISION_CONFLICT")
