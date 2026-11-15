@@ -242,7 +242,7 @@ class McpTests(unittest.TestCase):
                 core.update_record(first["record_id"], status="done", outputs=[{"sub": "video", "name": video.name}])
                 result = call("lumen_result", {"record_id": first["record_id"]})
                 self.assertTrue(result["structuredContent"]["ready"])
-                self.assertEqual(result["content"][1]["uri"], video.as_uri())
+                self.assertEqual(result["content"][1]["uri"], video.resolve().as_uri())
                 file = result["structuredContent"]["files"][0]
                 with urlopen(file["download_url"], timeout=3) as response:
                     self.assertEqual(response.read(), video.read_bytes())

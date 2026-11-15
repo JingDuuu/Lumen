@@ -181,7 +181,7 @@ def tool_result(value):
         for file in value.get("files", []):
             local = file.get("local_path")
             if local:
-                link = {"type": "resource_link", "uri": Path(local).as_uri(),
+                link = {"type": "resource_link", "uri": Path(local).resolve().as_uri(),
                                 "name": file.get("name") or Path(local).name,
                                 "mimeType": file.get("mime_type", "video/mp4"),
                                 "description": "Verified local Lumen output; use the chat host's attachment capability to show this video."}
