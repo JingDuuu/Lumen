@@ -61,7 +61,10 @@ def validate_params(params):
     mode = params.get("model_mode", "auto")
     if mode not in {"auto", "fl2va", "ref2va"}:
         raise ValueError("模型模式须为auto、fl2va或ref2va")
-    return dict(resolution=[w, h], duration=duration, steps=steps, seed=seed, model_mode=mode)
+    audio_mode = params.get("audio_mode", "generated")
+    if audio_mode not in {"generated", "silent"}:
+        raise ValueError("声音模式须为generated或silent")
+    return dict(resolution=[w, h], duration=duration, steps=steps, seed=seed, model_mode=mode, audio_mode=audio_mode)
 
 
 def validate_items(items):
@@ -80,10 +83,10 @@ def validate_items(items):
             if item.get("role") is not None and not isinstance(item["role"], str):
                 raise ValueError("素材卡片角色须为文本")
             name = item.get("file", "")
-            if not isinstance(name, str) or not name or (item.get("enabled", True) and not os.path.isfile(core.serve_input(name))):
+            if not isinstance(name, str) or not name or (core.reference_inputs.is_enabled(item) and not os.path.isfile(core.serve_input(name))):
                 raise ValueError("画板素材不存在，请重新上传")
     for role in ("first_frame", "last_frame", "middle_frame_1", "middle_frame_2", "middle_frame_3"):
-        if sum(i.get("enabled", True) and i.get("kind") == "image" and i.get("role") == role for i in items) > 1:
+        if sum(core.reference_inputs.is_enabled(i) and i.get("kind") == "image" and i.get("role") == role for i in items) > 1:
             raise ValueError("每个首帧、尾帧或中间帧位置只能指定一张图片")
 
 
@@ -101,9 +104,9 @@ def estimate(items, params, connections=None, zones=None):
     references = [entry for entry in manifest if entry["included"] and entry["kind"] in {"image", "video"}]
     if compiled["model_mode"] == "ref2va":
         expensive = expensive or len(references) > 3 or any(entry.get("video", {}).get("frames", 0) > 56 for entry in references)
-        warnings.append("Ref2VA在每个采样步读取参考，素材越多耗时越长；本机先用1张图和1段短视频试片。")
+        warnings.append(f"本次读取 {len(references)} 份视觉参考；耗时会随素材数量与参考视频长度变化。")
     if expensive:
-        warnings.append("此配置显著高于试片负载；本机10GB显存，高清长视频可能需要数小时。建议先生成2秒试片。")
+        warnings.append("参考较多或输出计算量较大；可直接生成，进度与剩余时间将按实际采样更新。")
     if p["duration"] < 5:
         warnings.append("2–4秒用于验证构图和工作流；低于模型训练时长范围，不代表最终成片质量。")
     for entry in references:
@@ -113,21 +116,27 @@ def estimate(items, params, connections=None, zones=None):
     if any(entry.get("role", "").startswith("middle_frame_") for entry in manifest if isinstance(entry.get("role"), str)):
         warnings.append("中间帧1/2/3分别约束25%、50%、75%的位置；这是模型条件，不保证逐像素复现。")
     warnings.append("视频时长和画幅以右侧参数为准；提示词中的秒数或分辨率不会修改参数。")
+    def conditioning_signature(entries):
+        return [(e.get("kind"), e.get("role"), e.get("video", {}).get("frames"),
+                 e.get("video", {}).get("width"), e.get("video", {}).get("height"),
+                 e.get("video", {}).get("include_audio"))
+                for e in entries if e.get("included", True) and e.get("kind") != "text"]
+
     samples = [r["elapsed_seconds"] for r in core.load_records()
                if r.get("status") == "done" and r.get("elapsed_seconds", 0) > 0
                and r.get("resolution") == p["resolution"] and r.get("frames") == frames
                and r.get("steps") == p["steps"] and bool((r.get("images") or {}).get("first_frame")) == bool(first)
                and bool((r.get("images") or {}).get("last_frame")) == bool(last)
                and r.get("model") == (core.MODEL_REF if compiled["model_mode"] == "ref2va" else core.MODEL_UNET)
-               and [(e.get("kind"), e.get("role"), e.get("video", {}).get("frames")) for e in r.get("input_manifest", []) if e.get("kind") != "text"] ==
-                   [(e.get("kind"), e.get("role"), e.get("video", {}).get("frames")) for e in manifest if e.get("kind") != "text"]]
+               and r.get("audio_mode", "generated") == p["audio_mode"]
+               and conditioning_signature(r.get("input_manifest", [])) == conditioning_signature(manifest)]
     seconds = round(statistics.median(samples[:5])) if samples else None
     return dict(ok=True, frames=frames, actual_duration=round(frames / 24, 2), params=p,
                 estimate_seconds=seconds,
                 estimate_label="暂无同配置实测，不能可靠估时" if seconds is None else "同配置实测参考；冷启动和显存占用会影响耗时",
-                warnings=warnings, requires_confirmation=expensive, capabilities=CAPABILITIES,
+                warnings=warnings, requires_confirmation=False, resource_tier="extended" if expensive else "standard", capabilities=CAPABILITIES,
                 model_mode=compiled["model_mode"], model_available=core.model_status()[compiled["model_mode"]]["available"],
-                compiled_prompt=compiled["compiled_prompt"], input_manifest=manifest, connection_manifest=compiled["connection_manifest"],
+                compiled_prompt=compiled["compiled_prompt"], prompt_sections=compiled["prompt_sections"], input_manifest=manifest, connection_manifest=compiled["connection_manifest"],
                 input_packet=core.reference_inputs.input_packet(compiled))
 
 
@@ -354,11 +363,9 @@ class TaskManager:
                 logging.exception("Could not reconcile Lumen jobs")
             self.stop_event.wait(3)
 
-    def submit(self, items, params, confirm=False, viewport=None, connections=None, zones=None):
+    def submit(self, items, params, confirm=False, viewport=None, connections=None, zones=None, source=None, title=None):
         budget = estimate(items, params, connections, zones)
         connections = core.normalize_connections(items, connections)
-        if budget["requires_confirmation"] and not confirm:
-            raise ValueError("请先阅读高负载提示并确认，或选择2秒试片")
         compiled = core.compile_inputs(items, budget["params"], connections, zones)
         prompt, fields = compiled["compiled_prompt"], compiled["fields"]
         manifest = compiled["input_manifest"]
@@ -382,7 +389,7 @@ class TaskManager:
             fields["_videos"] = [entry["file"] for entry in manifest if entry["included"] and entry["kind"] == "video"]
             pid = str(uuid.uuid4())
             rec = core.create_record(pid, p, fields, prompt, dict(first_frame=first, last_frame=last, reference=fields["_images_reference"]),
-                                     items, workflow, connections=connections, zones=zones, compiled=compiled)
+                                     items, workflow, connections=connections, zones=zones, compiled=compiled, source=source, title=title)
             core.update_record(rec["id"], status="submitting", stage="queued", stage_label="提交生成任务", viewport=viewport,
                                last_activity_at=time.time(), timeline=[dict(stage="queued", label="提交生成任务", at=time.time())])
             try:

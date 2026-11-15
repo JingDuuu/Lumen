@@ -83,6 +83,7 @@ const ACTIVE = new Set([
   "connecting",
   "stalled",
 ]);
+const pendingCancellations = new Set();
 const DEFAULT_PARAMS = {
   resolution: "608,352",
   duration: 2,
@@ -726,6 +727,7 @@ function thumbUrl(thumb) {
 }
 function recordTitle(record) {
   return (
+    record.title ||
     record.fields?.scene ||
     record.fields?.extra ||
     record.prompt ||
@@ -790,7 +792,6 @@ function restoreHistory(entry) {
 function invalidateEstimate() {
   state.estimate = null;
   state.estimateSignature = null;
-  $("confirm-expensive").checked = false;
   renderEstimate();
 }
 function cacheDraft(payload = snapshot(), dirty = state.dirty) {
@@ -1041,7 +1042,11 @@ function normalizeBoard(data, migrate = true) {
       panY: Number(source.panY) || 0,
     },
   };
-  return migrate ? prepareQuadrants(normal) : normal;
+  return document.body.classList.contains("gallery-mode")
+    ? normal
+    : migrate
+      ? prepareQuadrants(normal)
+      : normal;
 }
 
 function restoreBoard(data, fit = false) {
@@ -1109,6 +1114,10 @@ async function loadBoard() {
   }
   restoreBoard(data || { items: [] });
   state.loaded = true;
+  if (state.identityMigrated) {
+    state.identityMigrated = false;
+    markChanged();
+  }
   if (state.migrated) {
     markChanged();
     toast("旧画板已迁入固定象限，素材用途与连线已保留");
@@ -1185,6 +1194,7 @@ function applyView() {
   canvas.style.backgroundPosition = `${view.panX}px ${view.panY}px`;
 }
 function clearToolbarOverlap() {
+  if (document.body.classList.contains("gallery-mode")) return;
   if (!state.loaded || state.page !== "board" || drag) return;
   const toolbar = document
     .querySelector(".board-toolbar")
@@ -1237,6 +1247,7 @@ function fitZone(zoneId) {
 }
 
 function fitBoard(selectedOnly = false, bounds = null) {
+  if (document.body.classList.contains("gallery-mode")) return;
   state.focusedZone = null;
   let unfolded = false;
   if (selectedOnly)
@@ -1300,6 +1311,8 @@ function fitBoard(selectedOnly = false, bounds = null) {
   markChanged(false);
 }
 function newPosition() {
+  if (document.body.classList.contains("gallery-mode"))
+    return { x: 40, y: 140 };
   const rect = canvas.getBoundingClientRect(),
     point = screenToWorld(
       rect.left + rect.width / 2,
@@ -1359,17 +1372,22 @@ function addText(role = "scene", content = "", position = null) {
     h: 235,
   };
   state.items.push(item);
-  assignToZone(
-    item,
-    zoneAt({ x: item.x + item.w / 2, y: item.y + item.h / 2 }),
-  );
+  if (document.body.classList.contains("gallery-mode"))
+    item.zone_id = matchingZone(item)?.id || null;
+  else
+    assignToZone(
+      item,
+      zoneAt({ x: item.x + item.w / 2, y: item.y + item.h / 2 }),
+    );
   state.selectedIds = new Set([item.id]);
   state.selected = item.id;
   state.selectedConnection = null;
   renderBoard();
   renderSelection();
   markChanged();
-  world.querySelector(`[data-id="${CSS.escape(item.id)}"] textarea`)?.focus();
+  if (!document.body.classList.contains("gallery-mode"))
+    world.querySelector(`[data-id="${CSS.escape(item.id)}"] textarea`)?.focus();
+  return item;
 }
 function effectiveImageRole(item) {
   if (item.kind !== "image") return "reference";
@@ -1577,6 +1595,7 @@ function cardClassification(item) {
   return fields;
 }
 function renderBoard() {
+  if (document.body.classList.contains("gallery-mode")) ensureAssetIdentities();
   world.replaceChildren();
   renderZones();
   renderConnections();
@@ -1646,7 +1665,7 @@ function renderBoard() {
           event.stopPropagation();
           finishInteraction(false);
           selectCard(item.id);
-          showImagePreview(item);
+          removeCards([item.id]);
         });
       } else {
         media.controls = true;
@@ -1668,7 +1687,7 @@ function renderBoard() {
           node(
             "div",
             "card-video-range",
-            `选用 ${Number(item.video_start || 0).toFixed(1)} 秒起 · ${Number(item.video_duration ?? 2).toFixed(1)} 秒 · ${item.include_audio === false ? "不使用音轨" : "包含音轨（如有）"}`,
+            `选用 ${Number(item.video_start || 0).toFixed(1)} 秒起 · ${Number(item.video_duration ?? 2).toFixed(1)} 秒 · ${item.include_audio === true ? "包含音轨（如有）" : "不使用音轨"}`,
           ),
         );
       if (item.notes) card.append(node("p", "card-notes", item.notes));
@@ -1773,6 +1792,7 @@ function renderBoard() {
   $("board-item-count").textContent =
     `${state.items.length} 张卡片 · ${state.zones.length} 个分区 · ${state.connections.length} 条连线`;
   updateSelection();
+  window.dispatchEvent(new CustomEvent("lumen:board-changed"));
 }
 function renderSelection() {
   const item = state.items.find((value) => value.id === state.selected);
@@ -1866,7 +1886,7 @@ function renderSelection() {
     if ($("video-duration"))
       $("video-duration").value = item.video_duration ?? 2;
     if ($("video-include-audio"))
-      $("video-include-audio").checked = item.include_audio !== false;
+      $("video-include-audio").checked = item.include_audio === true;
   }
   for (const key of ["video-start", "video-duration", "video-include-audio"])
     if ($(key)) $(key).disabled = multiple;
@@ -2728,6 +2748,9 @@ async function uploadFiles(files, position = null) {
         id: id(),
         kind: file.type.startsWith("image/") ? "image" : "video",
         role: "reference",
+        ...(file.type.startsWith("video/")
+          ? { include_audio: false, video_start: 0, video_duration: 2 }
+          : {}),
         file: result.name,
         x: place.x + imported.length * 40,
         y: place.y + imported.length * 40,
@@ -2745,11 +2768,15 @@ async function uploadFiles(files, position = null) {
     return;
   }
   checkpoint();
-  for (const item of accepted)
-    assignToZone(
-      item,
-      zoneAt({ x: item.x + item.w / 2, y: item.y + item.h / 2 }),
-    );
+  for (const item of accepted) {
+    if (document.body.classList.contains("gallery-mode"))
+      item.reference_role = "general";
+    else
+      assignToZone(
+        item,
+        zoneAt({ x: item.x + item.w / 2, y: item.y + item.h / 2 }),
+      );
+  }
   state.items.push(...accepted);
   state.selectedIds = new Set(accepted.map((item) => item.id));
   state.selected = accepted.at(-1).id;
@@ -2759,6 +2786,7 @@ async function uploadFiles(files, position = null) {
   toast(
     `已导入 ${accepted.length} 个素材。选中图片可设置参考用途、人物视角或首尾/中间帧引导。`,
   );
+  return accepted;
 }
 function bindClipboardEvents() {
   for (const type of ["copy", "cut"])
@@ -2843,7 +2871,13 @@ function generationSignature() {
   return JSON.stringify({
     items: state.items.map(({ x, y, w, h, ...input }) => input),
     connections: state.connections,
-    zones: state.zones.map(({ id, name, purpose }) => ({ id, name, purpose })),
+    zones: state.zones.map(({ id, name, purpose, notes, description }) => ({
+      id,
+      name,
+      purpose,
+      notes,
+      description,
+    })),
     params: state.params,
   });
 }
@@ -2853,10 +2887,13 @@ function renderEstimate() {
   const result = state.estimate;
   if (!result) {
     $("estimate-detail").append(
-      node("p", "muted", "先检查输入和计算规模，再开始生成。"),
+      node(
+        "p",
+        "muted",
+        "开始生成时会自动检查素材和参数；耗时说明会显示在这里。",
+      ),
     );
     $("estimate-badge").textContent = "尚未检查";
-    $("expensive-confirm").hidden = true;
   } else {
     $("estimate-badge").textContent = result.requires_confirmation
       ? "高计算成本"
@@ -2900,23 +2937,17 @@ function renderEstimate() {
         ),
       ),
     );
-    $("expensive-confirm").hidden = !result.requires_confirmation;
   }
-  $("generate").textContent = state.busy
-    ? "正在处理…"
-    : result?.model_available === false
-      ? "重新检查模型"
-      : result
-        ? "开始生成镜头"
-        : "检查并预估";
-  $("generate").disabled =
-    state.busy ||
-    (result?.model_available !== false &&
-      !!result?.requires_confirmation &&
-      !$("confirm-expensive").checked);
+  renderGenerationProgress();
 }
 async function generate() {
-  if (state.busy || !paramsValid() || !commitParameterInputs()) return;
+  if (
+    state.busy ||
+    state.tasks.some((task) => ACTIVE.has(task.status)) ||
+    !paramsValid() ||
+    !commitParameterInputs()
+  )
+    return;
   const signature = generationSignature();
   state.busy = true;
   renderEstimate();
@@ -2936,27 +2967,37 @@ async function generate() {
       }
       state.estimate = estimate;
       state.estimateSignature = signature;
-      $("confirm-expensive").checked = false;
-      toast(
-        estimate.model_available === false
-          ? "输入检查完成，但对应模型尚未就绪。可查看实际输入预览。"
-          : "检查完成。确认配置后点击「开始生成镜头」。",
-      );
-    } else {
-      const payload = {
-        ...snapshot(),
-        confirm_expensive: $("confirm-expensive").checked,
-      };
-      await saveBoard();
-      await api("/api/generate", {
-        method: "POST",
-        body: payload,
-        timeout: 150000,
-      });
-      toast("镜头已提交，进度将显示在生成任务中");
-      invalidateEstimate();
-      await refreshTasks();
     }
+    if (state.estimate.model_available === false) {
+      toast("对应模型尚未就绪，请在「模型与安装」中检查。镜头尚未提交。", true);
+      return;
+    }
+    await saveBoard();
+    if (generationSignature() !== signature) {
+      toast("素材或参数刚刚发生变化，请再次点击生成", true);
+      return;
+    }
+    if (state.tasks.some((task) => ACTIVE.has(task.status))) return;
+    const submitted = await api("/api/generate", {
+      method: "POST",
+      body: snapshot(),
+      timeout: 150000,
+    });
+    if (
+      submitted.record_id &&
+      !state.tasks.some((task) => task.id === submitted.record_id)
+    ) {
+      state.tasks.unshift({
+        id: submitted.record_id,
+        status: "queued",
+        stage_label: "已提交，等待任务进度",
+        progress: {},
+      });
+      renderTasks();
+    }
+    toast("镜头已提交，进度将显示在生成任务中");
+    invalidateEstimate();
+    await refreshTasks();
   } catch (error) {
     report(error);
   } finally {
@@ -3018,6 +3059,7 @@ async function loadPresets() {
 async function refreshSystem() {
   try {
     state.system = await api("/api/system", { timeout: 15000 });
+    state.serviceOnline = true;
     const online = state.system.comfyui_running,
       engine = state.system.engine || {};
     $("system-info").title = engine.error || "查看本地模型与设备";
@@ -3030,9 +3072,11 @@ async function refreshSystem() {
           ? "本地引擎正在启动"
           : "本地引擎未连接";
   } catch {
+    state.serviceOnline = false;
     $("engine-dot").className = "status-dot offline";
     $("engine-text").textContent = "工作室连接中断";
   }
+  window.dispatchEvent(new CustomEvent("lumen:activity-changed"));
 }
 let originalImageFile = null;
 function showImagePreview(item) {
@@ -3196,6 +3240,15 @@ async function showInputs() {
       ),
     );
     content.append(counts);
+    if (result.prompt_sections?.length) {
+      const readable = node("div", "director-prompt-sections");
+      for (const section of result.prompt_sections) {
+        const part = node("section", "director-prompt-section");
+        part.append(node("h3", "", section.title), node("p", "", section.text));
+        readable.append(part);
+      }
+      content.append(readable);
+    }
     const list = node("div", "input-manifest");
     entries.forEach((entry, index) => {
       const original = state.items.find((item) => item.id === entry.item_id);
@@ -3349,14 +3402,17 @@ async function showInputs() {
         );
       }
     }
-    content.append(node("h3", "", "编译后的完整提示词"));
-    content.append(
+    const exactPrompt = node("details", "input-packet");
+    exactPrompt.open = !result.prompt_sections?.length;
+    exactPrompt.append(
+      node("summary", "", "完整模型提示词"),
       node(
         "pre",
         "compiled-prompt",
         result.compiled_prompt || "（无文字提示）",
       ),
     );
+    content.append(exactPrompt);
     content.append(
       button("复制完整提示词", "btn", async () => {
         try {
@@ -3501,6 +3557,84 @@ function stageTimeline(task) {
   });
   return list;
 }
+function taskCancelButton(task, compact = false) {
+  const cancelling =
+    task.status === "cancelling" || pendingCancellations.has(task.id);
+  const cancel = button(
+    cancelling ? "正在取消…" : compact ? "取消" : "取消此任务",
+    "btn danger",
+    async () => {
+      if (pendingCancellations.has(task.id)) return;
+      pendingCancellations.add(task.id);
+      renderTasks();
+      try {
+        const result = await api(
+          `/api/tasks/${encodeURIComponent(task.id)}/cancel`,
+          { method: "POST" },
+        );
+        const index = state.tasks.findIndex((entry) => entry.id === task.id);
+        if (index >= 0 && result.task) state.tasks[index] = result.task;
+        toast("已发送取消请求，正在更新任务状态");
+        await refreshTasks();
+      } catch (error) {
+        report(error);
+      } finally {
+        pendingCancellations.delete(task.id);
+        renderTasks();
+      }
+    },
+  );
+  cancel.disabled = cancelling;
+  return cancel;
+}
+function renderGenerationProgress() {
+  const task = state.tasks.find((entry) => ACTIVE.has(entry.status)),
+    section = $("generation-progress"),
+    generateButton = $("generate");
+  generateButton.disabled = state.busy || Boolean(task);
+  generateButton.textContent = task
+    ? task.status === "cancelling"
+      ? "正在停止当前任务…"
+      : "镜头生成中…"
+    : state.busy
+      ? "正在检查并提交…"
+      : "开始生成镜头";
+  section.hidden = !task;
+  section.replaceChildren();
+  if (!task) return;
+  const progress = task.progress || {},
+    hasProgress =
+      progress.percent != null && Number.isFinite(Number(progress.percent)),
+    percent = hasProgress
+      ? Math.max(0, Math.min(100, Number(progress.percent)))
+      : null,
+    heading = node("div", "generation-progress-heading"),
+    label =
+      task.status === "cancelling" || pendingCancellations.has(task.id)
+        ? "正在取消，等待引擎停止"
+        : task.stage_label || STATUS[task.status] || "等待任务反馈";
+  heading.append(node("strong", "", label));
+  if (progress.step != null && progress.total)
+    heading.append(
+      node("span", "", `采样 ${progress.step} / ${progress.total} 步`),
+    );
+  else if (hasProgress)
+    heading.append(node("span", "", `${Math.round(percent)}%`));
+  const bar = node("div", "task-progress" + (hasProgress ? "" : " unknown")),
+    fill = node("span"),
+    actions = node("div", "generation-progress-actions");
+  fill.style.width = (percent || 0) + "%";
+  bar.setAttribute("role", "progressbar");
+  bar.setAttribute("aria-label", "当前镜头进度");
+  if (hasProgress)
+    bar.setAttribute("aria-valuenow", String(Math.round(percent)));
+  bar.append(fill);
+  actions.append(
+    button("查看任务", "btn", () => setPage("tasks")),
+    taskCancelButton(task, true),
+  );
+  section.append(heading, bar, actions);
+}
 function buildTask(task, compact = false) {
   const fragment = document.createDocumentFragment(),
     heading = node("div", "task-heading"),
@@ -3509,6 +3643,8 @@ function buildTask(task, compact = false) {
     node("h2", "", recordTitle(task)),
     node("p", "task-date", `${task.created || ""} · ${task.id || ""}`),
   );
+  if (task.source?.kind === "agent" && task.source.client_name)
+    titleBox.append(node("p", "task-date", "来自 " + task.source.client_name));
   heading.append(titleBox, statusPill(task.status));
   fragment.append(heading);
   const progress = task.progress || {},
@@ -3589,24 +3725,7 @@ function buildTask(task, compact = false) {
     );
   const actions = node("div", "task-actions");
   if (ACTIVE.has(task.status)) {
-    const cancel = button("取消此任务", "btn danger", async () => {
-      cancel.disabled = true;
-      cancel.textContent = "正在取消…";
-      try {
-        await api(`/api/tasks/${encodeURIComponent(task.id)}/cancel`, {
-          method: "POST",
-        });
-        toast("已发送取消请求，正在更新任务状态");
-        await refreshTasks();
-      } catch (error) {
-        cancel.disabled = false;
-        cancel.textContent = "取消此任务";
-        report(error);
-      }
-    });
     if (task.status === "cancelling") {
-      cancel.disabled = true;
-      cancel.textContent = "正在取消，请稍候…";
       fragment.append(
         node(
           "p",
@@ -3615,7 +3734,7 @@ function buildTask(task, compact = false) {
         ),
       );
     }
-    actions.append(cancel);
+    actions.append(taskCancelButton(task));
   } else if (!compact) {
     actions.append(button("回填配置", "btn", () => refillRecord(task.id)));
     if (task.status === "done")
@@ -3660,6 +3779,8 @@ function renderTasks() {
   $("current-task-section").hidden = !current;
   $("current-task").replaceChildren();
   if (current) $("current-task").append(buildTask(current, true));
+  renderGenerationProgress();
+  window.dispatchEvent(new CustomEvent("lumen:activity-changed"));
 }
 async function refreshTasks() {
   if (polling) return;
@@ -3874,18 +3995,28 @@ function redoBoard() {
 }
 function showShortcuts() {
   const content = node("div", "shortcuts-content");
-  const pairs = [
-    ["Ctrl + Z / Ctrl + Shift + Z 或 Ctrl + Y", "撤销 / 重做"],
-    ["Ctrl + C / X / V", "复制 / 剪切 / 粘贴卡片及内部连线"],
-    ["Ctrl + D / Delete", "创建副本 / 删除选中内容"],
-    ["Ctrl + A / Shift + 单击", "全选 / 追加或取消选择"],
-    ["拖动空白 / Shift + 框选", "框选 / 追加框选"],
-    ["Ctrl + S", "保存画板，并显示全部卡片"],
-    ["F / Home", "聚焦选中卡片 / 显示全部"],
-    ["空格 + 拖动 / 中键拖动", "平移画板"],
-    ["方向键 / Shift + 方向键", "移动选中卡片 10 / 40 像素"],
-    ["Esc", "取消拖动、退出连线、关闭菜单"],
-  ];
+  const pairs = document.body.classList.contains("gallery-mode")
+    ? [
+        ["双击图版项", "移除当前镜头中的这一项；原素材与角色库保留"],
+        ["Ctrl + Z / Ctrl + Shift + Z", "撤销 / 重做"],
+        ["拖动卡片把手", "调整图版显示顺序"],
+        ["单击放大", "查看原图或参考视频"],
+        ["Ctrl + S", "保存当前镜头"],
+        ["Home / F", "回到图版顶部 / 聚焦选中素材"],
+        ["Delete", "移除选中素材"],
+      ]
+    : [
+        ["Ctrl + Z / Ctrl + Shift + Z 或 Ctrl + Y", "撤销 / 重做"],
+        ["Ctrl + C / X / V", "复制 / 剪切 / 粘贴卡片及内部连线"],
+        ["Ctrl + D / Delete", "创建副本 / 删除选中内容"],
+        ["Ctrl + A / Shift + 单击", "全选 / 追加或取消选择"],
+        ["拖动空白 / Shift + 框选", "框选 / 追加框选"],
+        ["Ctrl + S", "保存画板，并显示全部卡片"],
+        ["F / Home", "聚焦选中卡片 / 显示全部"],
+        ["空格 + 拖动 / 中键拖动", "平移画板"],
+        ["方向键 / Shift + 方向键", "移动选中卡片 10 / 40 像素"],
+        ["Esc", "取消拖动、退出连线、关闭菜单"],
+      ];
   for (const [key, description] of pairs) {
     const row = node("p", "shortcut-row");
     row.append(node("kbd", "", key), node("span", "", description));
@@ -3973,7 +4104,10 @@ function bindEditorKeyboard() {
       cancelInteraction();
       selectCard(null);
       if (returnToOverview) fitBoard();
-      canvas.focus();
+      (document.body.classList.contains("gallery-mode")
+        ? $("shot-workspace")
+        : canvas
+      )?.focus();
       return;
     }
     if ($("context-menu") && !$("context-menu").hidden) return;
@@ -4001,6 +4135,21 @@ function bindEditorKeyboard() {
       return;
     }
     if (command || event.altKey) return;
+    if (document.body.classList.contains("gallery-mode")) {
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        deleteSelection();
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        $("shot-workspace").scrollTop = 0;
+      } else if (key === "f") {
+        event.preventDefault();
+        document
+          .querySelector(".shot-asset.selected")
+          ?.scrollIntoView({ block: "center" });
+      }
+      return;
+    }
     if (event.key === " ") {
       if (!event.target.closest("button")) {
         event.preventDefault();
@@ -4271,7 +4420,6 @@ function bindEvents() {
     markChanged();
   });
   $("generate").addEventListener("click", generate);
-  $("confirm-expensive").addEventListener("change", renderEstimate);
   $("show-inputs").addEventListener("click", showInputs);
   $("system-info").addEventListener("click", showSystem);
   $("all-tasks").addEventListener("click", () => setPage("tasks"));
@@ -4468,6 +4616,35 @@ async function addReferencePreset(payload) {
   if (!state.loaded) throw new Error("画板尚未加载，请稍后再试");
   if (!Array.isArray(payload.items) || !payload.items.length)
     throw new Error("预设中没有卡片");
+  const presetAsset = payload.asset_id || payload.items[0]?.preset_id;
+  if (
+    presetAsset &&
+    state.items.some((item) => item.asset_id === presetAsset)
+  ) {
+    const existing = state.items.filter(
+      (item) => item.asset_id === presetAsset,
+    );
+    checkpoint();
+    existing.forEach((item) => {
+      item.asset_enabled = true;
+    });
+    renderBoard();
+    markChanged();
+    await saveBoard();
+    return { ids: existing.map((item) => item.id), connections: [] };
+  }
+  if (presetAsset)
+    payload.items = payload.items.map((item) => ({
+      ...item,
+      asset_id: item.asset_id || presetAsset,
+      asset_name: item.asset_name || payload.name,
+      ...(payload.category === "character"
+        ? {
+            character_id: item.character_id || "character_" + presetAsset,
+            character_name: item.character_name || payload.name,
+          }
+        : {}),
+    }));
   if (state.items.length + payload.items.length > MAX_ITEMS)
     throw new Error("调用后会超过 100 张卡片，请先整理画板");
   if (state.connections.length + (payload.connections?.length || 0) > 1000)
@@ -4614,7 +4791,232 @@ async function addReferencePreset(payload) {
     connections: edges.map((edge) => edge.id),
   };
 }
+function ensureAssetIdentities() {
+  let changed = false;
+  const unassigned = new Set(
+    state.items.filter((item) => !item.asset_id).map((item) => item.id),
+  );
+  for (const item of state.items) {
+    if (!item.asset_id) {
+      item.asset_id = item.preset_id || "asset_" + item.id;
+      changed = true;
+    }
+    if (!item.asset_name && item.preset_name) {
+      item.asset_name = item.preset_name;
+      changed = true;
+    }
+    if (purposeOf(item) === "character" && !item.character_id) {
+      item.character_id = "character_" + item.asset_id;
+      changed = true;
+    }
+    if (item.character_id && !item.character_name && item.preset_name) {
+      item.character_name = item.preset_name;
+      changed = true;
+    }
+  }
+  // A saved character preset is one entity. A shared spatial zone is never an identity.
+  const presets = new Map();
+  for (const item of state.items)
+    if (item.preset_id && item.character_id)
+      presets.set(item.preset_id, item.character_id);
+  for (const item of state.items)
+    if (item.preset_id && presets.has(item.preset_id) && !item.character_id) {
+      item.character_id = presets.get(item.preset_id);
+      changed = true;
+    }
+  for (const item of state.items) {
+    if (
+      item.kind !== "text" ||
+      !["char", "extra"].includes(item.role) ||
+      item.character_id ||
+      !unassigned.has(item.id)
+    )
+      continue;
+    const neighbors = state.connections
+      .filter((edge) => [edge.from, edge.to].includes(item.id))
+      .map((edge) =>
+        state.items.find(
+          (other) => other.id === (edge.from === item.id ? edge.to : edge.from),
+        ),
+      )
+      .filter((other) => other?.character_id);
+    const identities = [
+      ...new Set(neighbors.map((other) => other.character_id)),
+    ];
+    if (identities.length === 1) {
+      item.character_id = identities[0];
+      item.asset_id = neighbors[0].asset_id;
+      changed = true;
+    }
+  }
+  if (changed) state.identityMigrated = true;
+}
+function referenceGroups() {
+  const groups = new Map();
+  for (const item of state.items) {
+    const key = item.character_id || item.asset_id || item.id;
+    if (!groups.has(key))
+      groups.set(key, {
+        id: key,
+        asset_id: item.asset_id,
+        character_id: item.character_id || null,
+        items: [],
+      });
+    groups.get(key).items.push(item);
+  }
+  return [...groups.values()].map((group) => {
+    const first = group.items[0],
+      text =
+        group.items.find(
+          (item) => item.kind === "text" && item.role === "char",
+        ) || group.items.find((item) => item.kind === "text"),
+      media =
+        group.items.find((item) => item.kind === "image") ||
+        group.items.find((item) => item.kind === "video");
+    return {
+      ...group,
+      name:
+        first.character_name ||
+        first.asset_name ||
+        first.preset_name ||
+        first.name ||
+        (text?.content || "").split("\n")[0].slice(0, 38) ||
+        (group.character_id
+          ? "未命名角色"
+          : REFERENCE_ROLES[purposeOf(first)] || "参考素材"),
+      description: group.items
+        .filter(
+          (item) =>
+            item.kind === "text" &&
+            item.enabled !== false &&
+            (!group.character_id || item.role === "char"),
+        )
+        .map((item) => item.content || "")
+        .join("\n"),
+      purpose: group.character_id ? "character" : purposeOf(media || first),
+      image_url: media ? fileUrl(media.file) : null,
+      enabled: group.items.some(
+        (item) => item.enabled !== false && item.asset_enabled !== false,
+      ),
+      member_count: group.items.filter((item) => item.enabled !== false).length,
+      items: clone(group.items),
+    };
+  });
+}
+function notifyGallery() {
+  window.dispatchEvent(new CustomEvent("lumen:board-changed"));
+}
 window.LumenBoard = {
+  getState: () => ({ ...snapshot(), loaded: state.loaded }),
+  getActivity: () => ({
+    service_online: state.serviceOnline === true,
+    engine_ready: Boolean(state.system?.comfyui_running),
+    tasks: state.tasks.map((task) => ({
+      id: task.id, title: recordTitle(task), status: task.status,
+      active: ACTIVE.has(task.status), stage_label: task.stage_label,
+      progress: task.progress, created: task.created, source: task.source,
+      outputs: task.outputs, thumb_url: task.thumb ? thumbUrl(task.thumb) : null,
+    })),
+  }),
+  showPage: setPage,
+  openTask(taskId) {
+    const task = state.tasks.find((entry) => entry.id === taskId);
+    if (task?.status === "done" && task.outputs?.length) openAsset(task);
+    else setPage("tasks");
+  },
+  getGroups: () => referenceGroups(),
+  getCharacters: () => referenceGroups().filter((group) => group.character_id),
+  selectItems(ids) {
+    state.selectedIds = new Set(
+      ids.filter((key) => state.items.some((item) => item.id === key)),
+    );
+    state.selected = [...state.selectedIds].at(-1) || null;
+    state.selectedConnection = null;
+    updateSelection();
+  },
+  updateItems(ids, fields, history = true) {
+    const targets = state.items.filter((item) => ids.includes(item.id));
+    if (!targets.length) return;
+    if (history) checkpoint();
+    targets.forEach((item) => Object.assign(item, clone(fields)));
+    renderBoard();
+    markChanged();
+  },
+  setAssetEnabled(ids, enabled) {
+    const members = state.items.filter((item) => ids.includes(item.id));
+    if (enabled && !members.some((item) => item.enabled !== false))
+      return false;
+    checkpoint();
+    members.forEach((item) => {
+      item.asset_enabled = enabled;
+    });
+    renderBoard();
+    markChanged();
+    return true;
+  },
+  updateParameters(fields, history = true) {
+    if (history) checkpoint();
+    Object.assign(state.params, fields);
+    renderParams();
+    markChanged();
+    notifyGallery();
+  },
+  setAssetPurpose(ids, purpose) {
+    checkpoint();
+    for (const item of state.items.filter((value) => ids.includes(value.id))) {
+      setPurpose(item, purpose);
+      if (purpose !== "character") {
+        delete item.character_id;
+        delete item.character_name;
+      }
+    }
+    renderBoard();
+    markChanged();
+  },
+  setImageUsage(itemId, role) {
+    const item = state.items.find((value) => value.id === itemId);
+    if (!item) return;
+    checkpoint();
+    setImageRole(item, role);
+    renderBoard();
+    markChanged();
+  },
+  removeItems: removeCards,
+  addText(role, content = "") {
+    return clone(addText(role, content));
+  },
+  previewItem(itemId) {
+    const item = state.items.find((value) => value.id === itemId);
+    if (item?.kind === "image") showImagePreview(item);
+    else if (item?.kind === "video") {
+      const video = node("video");
+      video.src = fileUrl(item.file);
+      video.controls = true;
+      video.style.width = "100%";
+      openInfo("参考视频", video);
+    }
+  },
+  uploadFiles,
+  reorderAsset(sourceId, targetId) {
+    const source = referenceGroups().find((group) => group.id === sourceId),
+      target = referenceGroups().find((group) => group.id === targetId);
+    if (!source || !target || sourceId === targetId) return;
+    checkpoint();
+    const ids = new Set(source.items.map((item) => item.id)),
+      moving = state.items.filter((item) => ids.has(item.id));
+    state.items = state.items.filter((item) => !ids.has(item.id));
+    const index = state.items.findIndex(
+      (item) => item.id === target.items[0].id,
+    );
+    state.items.splice(index, 0, ...moving);
+    renderBoard();
+    markChanged();
+  },
+  save: saveBoard,
+  undo: undoBoard,
+  redo: redoBoard,
+  showInputs,
+  toast,
   getSelectedReferences() {
     if (!state.loaded) throw new Error("画板尚未加载");
     finishInteraction(false);

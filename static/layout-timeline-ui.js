@@ -1,180 +1,126 @@
 import { node, action } from './layout-editor-ui.js';
+import { numericChannels, channelValue, setChannelValue, sampleChannel, tangentHandle, segmentHandles, editTangent } from './layout-curves.js';
 
-const labels = {
-  position:'位置',rotation:'旋转',scale:'缩放',quaternion:'镜头方向',focal:'焦距',
-  visible:'显示',parentId:'挂接父级',pose:'姿态',hands:'手势',body:'人物比例',
-  face:'脸部',material:'材质',rail:'相机轨道',progress:'轨道进度',color:'颜色',
-  roughness:'粗糙度',metalness:'金属度',opacity:'透明度',eyeOpen:'睁眼',mouthOpen:'张嘴',mouthSmile:'微笑'
-};
-const propertyLabel = path => path.split('.').map(part => labels[part] || ({0:'X',1:'Y',2:'Z'})[part] || part).join(' · ');
+const copy=value=>JSON.parse(JSON.stringify(value));
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const labels={position:'位置',rotation:'旋转',scale:'缩放',quaternion:'镜头方向',focal:'焦距',visible:'显示',parentId:'父级',pose:'姿态',hands:'手势',body:'比例',face:'表情',material:'材质',rail:'导轨',progress:'进度',color:'颜色',roughness:'粗糙度',metalness:'金属度',opacity:'透明度',eyeOpen:'睁眼',mouthOpen:'张嘴',mouthSmile:'微笑'};
+const label=path=>path.split('.').map(part=>labels[part]||({0:'X',1:'Y',2:'Z'})[part]||part).join(' · ');
+const colors=['#ee8088','#7edbb0','#7fb9ff','#e6c56e','#be9ef2','#71d3de','#e5a3d1','#bbca8c'];
+const svg=(tag,attrs={})=>{const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,v);return e;};
 
 export class TimelineUI {
-  constructor(mount, api) {
-    this.mount=mount;
-    this.api=api;
-    this.expanded=false;
-    this.everHadTracks=false;
-    this.selectedKeys=new Map();
-    this.closedGroups=new Set();
-    this.zoom=1;
-    this.scene=null;
-    this.time=0;
-    this.create();
+  constructor(mount,api){
+    Object.assign(this,{mount,api,scene:null,time:0,expanded:false,everHadTracks:false,selectedKeys:new Map(),closedGroups:new Set(),view:{start:0,end:5},mode:'tracks',activeTrack:null,activeChannels:new Set(),activeChannel:'',valueView:{min:-1,max:1},clipboard:[],snap:true,drag:null,previewTracks:null});
+    this.create();this.observer=new ResizeObserver(()=>{if(this.scene&&!this.drag){this.drawRuler();this.drawCurve();}});this.observer.observe(mount);
   }
-
-  create() {
+  message(text){this.notice.textContent=text;this.api.message?.(text);}
+  number(id,min,max,step,title,run){const input=node('input');Object.assign(input,{id,type:'number',min:String(min),max:String(max),step:String(step),title});input.setAttribute('aria-label',title);input.addEventListener('change',()=>{if(input.reportValidity())run(Number(input.value));});return input;}
+  create(){
+    this.mount.classList.add('lumen-sequencer','collapsed');this.mount.tabIndex=0;this.mount.setAttribute('aria-label','动画时间线与曲线编辑器');
     const header=node('div','previs-timeline-header');
-    this.mount.classList.add('collapsed');
-    this.expand=action('展开时间线',()=>{
-      this.expanded=!this.expanded;
-      this.mount.classList.toggle('collapsed',!this.expanded);
-      this.expand.textContent=this.expanded?'收起时间线':'展开时间线';
-    },'layout-timeline-expand');
-    this.play=action('播放 Space',()=>this.api.play(),'layout-play');
-    this.quick=action('K 全部 + 当前视角',()=>this.api.keyAll(),'layout-key-add','previs-button primary-quiet');
-    const duration=node('label','previs-time-control');
-    duration.append(node('span','','时长'));
-    this.duration=node('input');this.duration.type='number';this.duration.min=1;this.duration.max=300;this.duration.step=.1;this.duration.id='layout-sequence-duration';
-    this.duration.addEventListener('change',()=>{if(this.duration.reportValidity())this.api.duration(Number(this.duration.value));});
-    duration.append(this.duration,node('span','','秒'));
-    const fps=node('label','previs-time-control');fps.append(node('span','','FPS'));
-    this.fps=node('input');this.fps.type='number';this.fps.min=1;this.fps.max=60;this.fps.step=1;this.fps.id='layout-sequence-fps';
-    this.fps.addEventListener('change',()=>{if(this.fps.reportValidity())this.api.fps(Number(this.fps.value));});fps.append(this.fps);
-    const zoom=node('select');zoom.title='时间线缩放';zoom.id='layout-timeline-zoom';
-    for(const [value,label] of [[1,'全长'],[2,'2×'],[4,'4×'],[8,'8×']]){const option=node('option','',label);option.value=value;zoom.append(option);}
-    zoom.addEventListener('change',()=>{this.zoom=Number(zoom.value);this.render(this.scene,this.time);});
-    this.timeOutput=node('output');this.timeOutput.id='layout-time-value';
-    header.append(node('strong','','Sequence'),this.expand,this.play,this.quick,duration,fps,zoom,this.timeOutput);
-    const transport=node('div','previs-transport');
-    this.timeInput=node('input');this.timeInput.id='layout-time';this.timeInput.type='range';this.timeInput.min=0;this.timeInput.step=.001;
-    this.timeInput.setAttribute('aria-label','动画时间线');
-    this.timeInput.addEventListener('input',()=>this.api.seek(Number(this.timeInput.value)));
-    transport.append(this.timeInput);
-    this.scroll=node('div','previs-tracks-scroll');
-    this.scroll.id='layout-tracks';
-    this.rows=node('div','previs-tracks-content');
-    this.scroll.append(this.rows);
-    const selection=node('div','previs-key-selection');
-    this.selectionLabel=node('span','','未选择关键帧');
-    this.keyTime=node('input');this.keyTime.type='number';this.keyTime.min=0;this.keyTime.step=.001;this.keyTime.id='layout-key-time';this.keyTime.title='选中关键帧时间';
-    this.keyTime.addEventListener('change',()=>{
-      const first=this.selectedKeys.values().next().value;
-      if(!first||!this.keyTime.reportValidity())return;
-      const old=this.findKey(first),delta=Number(this.keyTime.value)-(old?.time || 0);
-      this.api.moveKeys([...this.selectedKeys.values()].map(item=>({...item,time:Math.max(0,Math.min(this.scene.sequence.duration,this.findKey(item).time+delta))})));
-    });
-    this.interpolation=node('select');this.interpolation.id='layout-key-interpolation';this.interpolation.title='选中关键帧插值';
-    for(const [value,label] of [['linear','线性'],['smooth','平滑'],['step','保持']]){const option=node('option','',label);option.value=value;this.interpolation.append(option);}
-    this.interpolation.addEventListener('change',()=>this.api.interpolation([...this.selectedKeys.values()],this.interpolation.value));
-    this.delete=action('删除选中帧',()=>this.deleteSelected(),'layout-key-delete','previs-button danger');
-    selection.append(this.selectionLabel,this.keyTime,this.interpolation,this.delete,node('span','previs-help','Shift 多选 · 拖动移动 · 删除可撤销'));
-    this.mount.replaceChildren(header,transport,this.scroll,selection);
+    this.expand=action('展开时间线',()=>{this.expanded=!this.expanded;this.mount.classList.toggle('collapsed',!this.expanded);this.expand.textContent=this.expanded?'收起':'展开时间线';this.drawRuler();this.drawCurve();},'layout-timeline-expand');
+    this.play=action('▶ 播放',()=>this.api.play(),'layout-play');this.play.title='Space 播放 / 暂停';
+    const prev=action('│‹',()=>this.previousKey(-1),'layout-key-previous'),next=action('›│',()=>this.previousKey(1),'layout-key-next');prev.title='上一关键帧（↑ 或 ,）';next.title='下一关键帧（↓ 或 .）';
+    this.quick=action('＋ 记录关键帧',()=>this.api.keyAll(),'layout-key-add');
+    this.modeButton=action('曲线编辑器',()=>{this.mode=this.mode==='tracks'?'curves':'tracks';this.expanded=true;this.mount.classList.remove('collapsed');this.expand.textContent='收起';this.fitValues();this.render(this.scene,this.time);},'layout-curve-toggle');
+    this.snapButton=action('帧吸附 开',()=>{this.snap=!this.snap;this.snapButton.textContent='帧吸附 '+(this.snap?'开':'关');this.snapButton.setAttribute('aria-pressed',String(this.snap));},'layout-time-snap');this.snapButton.setAttribute('aria-pressed','true');
+    this.duration=this.number('layout-sequence-duration',1,300,.1,'片段时长（秒）',v=>this.api.duration(v));this.fps=this.number('layout-sequence-fps',1,60,1,'帧率 FPS',v=>this.api.fps(v));
+    const settings=node('div','sequence-settings');settings.append(node('span','','秒'),this.duration,node('span','','FPS'),this.fps);this.timeOutput=node('output');this.timeOutput.id='layout-time-value';
+    header.append(node('strong','','SEQUENCER'),this.expand,prev,this.play,next,this.quick,this.modeButton,action('全览 Home',()=>this.fit(),'layout-timeline-fit'),this.snapButton,settings,this.timeOutput);
+    const transport=node('div','previs-transport');this.timeInput=node('input');Object.assign(this.timeInput,{id:'layout-time',type:'range',min:'0',step:'.001'});this.timeInput.setAttribute('aria-label','动画播放头');this.timeInput.addEventListener('input',()=>this.seek(Number(this.timeInput.value)));transport.append(this.timeInput);
+    this.body=node('div','sequence-body');this.scroll=node('div','previs-tracks-scroll');this.scroll.id='layout-tracks';this.rows=node('div','previs-tracks-content');this.scroll.append(this.rows);
+    this.curveView=node('div','sequence-curve-view');this.curveView.id='layout-curve-view';this.channelList=node('div','sequence-channel-list');this.curveArea=node('div','sequence-curve-area');this.curveArea.id='layout-curve-graph';this.graph=svg('svg',{'aria-label':'数值与时间曲线',role:'application'});this.curveArea.append(this.graph);this.curveView.append(this.channelList,this.curveArea);this.body.append(this.scroll,this.curveView);
+    const selection=node('div','previs-key-selection');this.selectionLabel=node('strong','','未选择关键帧');
+    this.keyTime=this.number('layout-key-time',0,300,.001,'选中关键帧时间',v=>this.shiftSelection(v-(this.findKey([...this.selectedKeys.values()][0])?.time||0)));
+    this.keyValue=this.number('layout-key-value',-1e12,1e12,.01,'曲线分量数值',v=>this.setSelectedValue(v));
+    this.interpolation=node('select');this.interpolation.id='layout-key-interpolation';this.interpolation.title='选中分量的曲线模式';
+    for(const [value,text]of [['auto','自动 Auto'],['user','用户 User'],['break','分离 Break'],['linear','线性 Linear'],['constant','保持 Constant'],['legacy-smooth','旧平滑 Smooth']]){const option=node('option','',text);option.value=value;this.interpolation.append(option);}this.interpolation.addEventListener('change',()=>this.setMode(this.interpolation.value));
+    this.delete=action('删除',()=>this.deleteSelected(),'layout-key-delete','previs-button danger');selection.append(this.selectionLabel,node('span','','时间'),this.keyTime,node('span','','值'),this.keyValue,this.interpolation,action('复制',()=>this.copySelected(),'layout-key-copy'),action('粘贴',()=>this.pasteSelected(),'layout-key-paste'),this.delete);
+    this.notice=node('div','sequence-notice','Alt + 滚轮缩放 · 中键平移 · 空白拖框选 · Shift 多选 · ← → 逐帧 · ↑ ↓ 前后关键帧 · Ctrl+C / V · Ctrl+Z');this.notice.setAttribute('role','status');
+    this.mount.replaceChildren(header,transport,this.body,selection,this.notice);
+    this.mount.addEventListener('keydown',e=>this.onKey(e));this.mount.addEventListener('pointerdown',e=>{if(!e.target.closest('input,select,textarea'))this.mount.focus({preventScroll:true});});
+    this.body.addEventListener('wheel',e=>this.onWheel(e),{passive:false});this.body.addEventListener('pointerdown',e=>{if(e.button===1)this.beginPan(e);});
+    this.graph.addEventListener('pointerdown',e=>{if(e.button===0&&!e.target.closest('[data-key-id],[data-handle]'))this.beginMarquee(e,true);});
+    this.graph.addEventListener('dblclick',e=>{if(e.target===this.graph||e.target.classList.contains('sequence-curve-grid'))this.addCurveKey(e);});
   }
-
-  findKey(item) {
-    return this.scene?.sequence.tracks.find(track=>track.id===item.trackId)?.keys.find(key=>key.id===item.keyId);
-  }
-
+  findTrack(id){return this.previewTracks?.find(t=>t.id===id)||this.scene?.sequence.tracks.find(t=>t.id===id);}
+  findKey(item){return item&&this.findTrack(item.trackId)?.keys.find(k=>k.id===item.keyId);}
   selectedCount(){return this.selectedKeys.size;}
-  resetForScene(){this.everHadTracks=false;this.expanded=false;this.selectedKeys.clear();this.mount.classList.add('collapsed');this.expand.textContent='展开时间线';}
-  deleteSelected(){if(this.selectedKeys.size)this.api.removeKeys([...this.selectedKeys.values()]);this.selectedKeys.clear();}
-
-  selectKey(track,key,additive=false) {
-    if(!additive)this.selectedKeys.clear();
-    const id=track.id+':'+key.id;
-    if(additive&&this.selectedKeys.has(id))this.selectedKeys.delete(id);
-    else this.selectedKeys.set(id,{trackId:track.id,keyId:key.id});
-    this.api.seek(key.time);
-    this.render(this.scene,key.time);
+  resetForScene(){this.cancelGesture?.();this.everHadTracks=false;this.expanded=false;this.selectedKeys.clear();this.activeTrack=null;this.closedGroups.clear();this.view={start:0,end:5};this.mount.classList.add('collapsed');this.expand.textContent='展开时间线';}
+  seek(time){this.api.stop?.();this.api.seek(clamp(time,0,this.scene.sequence.duration));}
+  snapTime(time){return this.snap?Math.round(time*this.scene.sequence.fps)/this.scene.sequence.fps:time;}
+  timeAt(x,box){return this.view.start+(x-box.left)/box.width*(this.view.end-this.view.start);}
+  percent(time){return(time-this.view.start)/(this.view.end-this.view.start)*100;}
+  fit(){if(!this.scene)return;this.view={start:-this.scene.sequence.duration*.025,end:this.scene.sequence.duration*1.025};this.fitValues();this.render(this.scene,this.time);}
+  fitValues(){const track=this.findTrack(this.activeTrack);if(!track)return;const values=[];for(const path of this.activeChannels)for(let i=0;i<=80;i++)values.push(sampleChannel(track,this.scene.sequence.duration*i/80,path));const valid=values.filter(Number.isFinite);if(!valid.length)return;const min=Math.min(...valid),max=Math.max(...valid),pad=Math.max((max-min)*.16,.25);this.valueView={min:min-pad,max:max+pad};}
+  selectTrack(track){if(!track)return;this.activeTrack=track.id;this.activeChannels=new Set(numericChannels(track).slice(0,3));this.activeChannel=[...this.activeChannels][0]??'';this.fitValues();}
+  render(scene,time){
+    if(!scene)return;this.scene=scene;this.time=time;if(this.drag)return;
+    if(scene.sequence.tracks.length&&!this.everHadTracks){this.everHadTracks=true;this.expanded=true;this.mount.classList.remove('collapsed');this.expand.textContent='收起';this.view={start:-scene.sequence.duration*.025,end:scene.sequence.duration*1.025};}
+    if(!this.findTrack(this.activeTrack)&&scene.sequence.tracks.length)this.selectTrack(scene.sequence.tracks.find(t=>numericChannels(t).length)||scene.sequence.tracks[0]);
+    for(const [id,item]of this.selectedKeys)if(!this.findKey(item))this.selectedKeys.delete(id);
+    this.duration.value=scene.sequence.duration;this.fps.value=scene.sequence.fps||24;this.timeInput.max=scene.sequence.duration;this.keyTime.max=scene.sequence.duration;
+    this.modeButton.textContent=this.mode==='curves'?'返回轨道':'曲线编辑器';this.mount.classList.toggle('curve-mode',this.mode==='curves');this.drawTracks();this.drawChannels();this.drawCurve();this.updateSelection();this.setTime(time);
   }
-
-  render(scene,time) {
-    if(!scene)return;
-    if(scene.sequence.tracks.length&&!this.everHadTracks){this.everHadTracks=true;this.expanded=true;this.mount.classList.remove('collapsed');this.expand.textContent='收起时间线';}
-    this.scene=scene;
-    this.time=time;
-    this.duration.value=scene.sequence.duration;
-    this.fps.value=scene.sequence.fps || 24;
-    this.timeInput.max=scene.sequence.duration;
-    this.keyTime.max=scene.sequence.duration;
-    for(const [id,item] of this.selectedKeys)if(!this.findKey(item))this.selectedKeys.delete(id);
-    const scrollTop=this.scroll.scrollTop,scrollLeft=this.scroll.scrollLeft;
-    this.rows.replaceChildren();
-    this.rows.style.minWidth=Math.max(650,scene.sequence.duration*8*this.zoom)+'px';
-    const groups=new Map();
-    for(const track of scene.sequence.tracks){if(!groups.has(track.targetId))groups.set(track.targetId,[]);groups.get(track.targetId).push(track);}
-    if(!groups.size)this.rows.append(node('div','previs-timeline-empty','还没有动画。调整场景后按 K，或用属性右侧的 K 单独记录。相机、角色、表情、材质和挂接关系都可以记录。'));
-    for(const [targetId,tracks] of groups){
-      const title=targetId==='camera'?'拍摄相机':scene.objects.find(object=>object.id===targetId)?.label || targetId;
-      const group=node('div','previs-track-group');
-      const toggle=action((this.closedGroups.has(targetId)?'▸ ':'▾ ')+title,()=>{
-        if(this.closedGroups.has(targetId))this.closedGroups.delete(targetId);else this.closedGroups.add(targetId);
-        this.render(this.scene,this.time);
-      },'','previs-track-group-title');
-      group.append(toggle,node('span','previs-track-count',tracks.length+' 轨'));
-      this.rows.append(group);
-      if(this.closedGroups.has(targetId))continue;
-      for(const track of tracks){
-        const row=node('div','previs-track-row');row.dataset.trackId=track.id;
-        const label=node('div','previs-track-label',propertyLabel(track.property));label.title=track.property;
-        const strip=node('div','previs-key-strip');strip.dataset.trackId=track.id;
-        strip.addEventListener('pointerdown',event=>{
-          if(event.target.closest('button'))return;
-          const box=strip.getBoundingClientRect();
-          this.selectedKeys.clear();
-          this.api.seek(Math.max(0,Math.min(scene.sequence.duration,(event.clientX-box.left)/box.width*scene.sequence.duration)));
-        });
-        const playhead=node('span','previs-track-playhead');playhead.style.left=time/scene.sequence.duration*100+'%';strip.append(playhead);
-        for(const key of track.keys){
-          const selected=this.selectedKeys.has(track.id+':'+key.id);
-          const keyButton=node('button','previs-key-diamond'+(selected?' selected':''));keyButton.type='button';keyButton.style.left=key.time/scene.sequence.duration*100+'%';keyButton.dataset.keyId=key.id;
-          keyButton.title=`${title} / ${propertyLabel(track.property)} · ${key.time.toFixed(3)} 秒`;
-          keyButton.setAttribute('aria-label',keyButton.title);
-          keyButton.addEventListener('pointerdown',event=>this.beginDrag(event,track,key,strip));
-          strip.append(keyButton);
-        }
-        row.append(label,strip);this.rows.append(row);
+  drawTracks(){
+    const top=this.scroll.scrollTop;this.rows.replaceChildren();const rulerRow=node('div','sequence-ruler-row');rulerRow.append(node('div','sequence-ruler-label','对象 / 属性'));this.ruler=node('div','sequence-ruler');this.ruler.id='layout-time-ruler';this.ruler.addEventListener('pointerdown',e=>{if(e.button===0)this.beginScrub(e,this.ruler);});rulerRow.append(this.ruler);this.rows.append(rulerRow);
+    const groups=new Map();for(const track of this.previewTracks||this.scene.sequence.tracks){if(!groups.has(track.targetId))groups.set(track.targetId,[]);groups.get(track.targetId).push(track);}
+    if(!groups.size)this.rows.append(node('div','previs-timeline-empty','先记录关键帧。选择对象或相机，调整属性后点「记录关键帧」。所有编辑可撤销。'));
+    for(const [targetId,tracks]of groups){
+      const title=targetId==='camera'?'拍摄相机':targetId==='environment'?'环境':this.scene.objects.find(o=>o.id===targetId)?.label||targetId;
+      const group=node('div','previs-track-group');group.append(action((this.closedGroups.has(targetId)?'▸ ':'▾ ')+title,()=>{this.closedGroups.has(targetId)?this.closedGroups.delete(targetId):this.closedGroups.add(targetId);this.drawTracks();},'','previs-track-group-title'),node('span','previs-track-count',tracks.length+' 轨'));this.rows.append(group);if(this.closedGroups.has(targetId))continue;
+      for(const track of tracks){const row=node('div','previs-track-row'+(track.id===this.activeTrack?' active-track':''));row.dataset.trackId=track.id;const name=action(label(track.property),()=>{this.selectTrack(track);this.render(this.scene,this.time);},'','previs-track-label');name.title=track.property;const strip=node('div','previs-key-strip');strip.dataset.trackId=track.id;strip.addEventListener('pointerdown',e=>{if(e.button===0&&!e.target.closest('[data-key-id]'))this.beginMarquee(e,false);});const playhead=node('span','previs-track-playhead');playhead.style.left=this.percent(this.time)+'%';strip.append(playhead);
+        for(const key of track.keys){const left=this.percent(key.time);if(left<0||left>100)continue;const button=node('button','previs-key-diamond'+(this.selectedKeys.has(track.id+':'+key.id)?' selected':''));button.type='button';button.style.left=left+'%';button.dataset.keyId=key.id;button.title=`${title} / ${label(track.property)} · ${Math.round(key.time*this.scene.sequence.fps)} 帧 / ${key.time.toFixed(3)} 秒`;button.setAttribute('aria-label',button.title);button.addEventListener('pointerdown',e=>this.beginKeyDrag(e,track,key));strip.append(button);}row.append(name,strip);this.rows.append(row);
       }
-    }
-    this.scroll.scrollTop=scrollTop;this.scroll.scrollLeft=scrollLeft;
-    const selected=[...this.selectedKeys.values()],first=selected[0],key=first&&this.findKey(first);
-    this.selectionLabel.textContent=selected.length?`已选 ${selected.length} 帧`:'未选择关键帧';
-    this.keyTime.disabled=this.interpolation.disabled=this.delete.disabled=!key;
-    this.keyTime.value=key?.time ?? 0;
-    const track=first&&scene.sequence.tracks.find(track=>track.id===first.trackId);
-    this.interpolation.value=key?.interpolation || track?.interpolation || 'linear';
-    this.setTime(time);
+    }this.scroll.scrollTop=top;this.drawRuler();
   }
-
-  beginDrag(event,track,key,strip){
-    if(event.button!==0)return;
-    event.preventDefault();event.stopPropagation();
-    const id=track.id+':'+key.id;
-    if(!this.selectedKeys.has(id)){
-      if(!event.shiftKey&&!event.ctrlKey&&!event.metaKey)this.selectedKeys.clear();
-      this.selectedKeys.set(id,{trackId:track.id,keyId:key.id});
-    }else if(event.shiftKey){this.selectedKeys.delete(id);this.render(this.scene,this.time);return;}
-    const selection=[...this.selectedKeys.values()],original=selection.map(item=>({...item,time:this.findKey(item).time})),start=event.clientX,width=strip.getBoundingClientRect().width;
-    const lower=-Math.min(...original.map(item=>item.time)),upper=this.scene.sequence.duration-Math.max(...original.map(item=>item.time));
-    let delta=0,moved=false;
-    const move=next=>{
-      delta=(next.clientX-start)/width*this.scene.sequence.duration;
-      const frame=1/(this.scene.sequence.fps || 24);delta=Math.round(delta/frame)*frame;
-      delta=Math.max(lower,Math.min(upper,delta));moved ||= Math.abs(next.clientX-start)>3;
-      for(const item of original){const button=this.rows.querySelector(`[data-track-id="${CSS.escape(item.trackId)}"] [data-key-id="${CSS.escape(item.keyId)}"]`);if(button){button.classList.add('selected');button.style.left=(item.time+delta)/this.scene.sequence.duration*100+'%';}}
-    };
-    const finish=()=>{
-      window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',cancel);
-      if(moved)this.api.moveKeys(original.map(item=>({...item,time:item.time+delta})));else {this.api.seek(key.time);this.render(this.scene,key.time);}
-    };
-    const cancel=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',finish);window.removeEventListener('pointercancel',cancel);this.render(this.scene,this.time);};
-    window.addEventListener('pointermove',move);window.addEventListener('pointerup',finish,{once:true});window.addEventListener('pointercancel',cancel,{once:true});
+  ticks(width){const span=this.view.end-this.view.start,raw=span/Math.max(2,width/100),power=10**Math.floor(Math.log10(raw)),step=[1,2,5,10].map(n=>n*power).find(n=>n>=raw)||power*10,ticks=[];for(let t=Math.ceil(this.view.start/step)*step;t<=this.view.end+1e-8;t+=step)if(t>=0&&t<=this.scene.sequence.duration)ticks.push({time:t,label:`${Math.round(t*this.scene.sequence.fps)}f · ${Number(t.toFixed(3))}s`});return ticks;}
+  drawRuler(){if(!this.scene||!this.ruler)return;this.ruler.replaceChildren();for(const tick of this.ticks(this.ruler.clientWidth)){const text=node('span','sequence-ruler-tick',tick.label);text.style.left=this.percent(tick.time)+'%';this.ruler.append(text);}const head=node('span','sequence-ruler-head');head.style.left=this.percent(this.time)+'%';this.ruler.append(head);this.mount.dataset.viewStart=this.view.start;this.mount.dataset.viewEnd=this.view.end;}
+  drawChannels(){
+    this.channelList.replaceChildren();const select=node('select');select.id='layout-curve-track';select.title='曲线轨道';for(const track of this.scene.sequence.tracks){const option=node('option','',`${track.targetId==='camera'?'相机':this.scene.objects.find(o=>o.id===track.targetId)?.label||track.targetId} · ${label(track.property)}`);option.value=track.id;select.append(option);}select.value=this.activeTrack||'';select.addEventListener('change',()=>{this.selectTrack(this.findTrack(select.value));this.drawChannels();this.drawCurve();this.updateSelection();});this.channelList.append(select);
+    const track=this.findTrack(this.activeTrack),channels=numericChannels(track);if(!channels.length){this.channelList.append(node('p','sequence-channel-note','此轨道没有可编辑的数值分量。文字、开关、父级保持离散；四元数继续使用球面插值，不显示伪曲线。'));return;}
+    for(const [index,path]of channels.entries()){const row=node('label','sequence-channel'+(this.activeChannel===path?' active':'')),input=node('input');input.type='checkbox';input.checked=this.activeChannels.has(path);input.dataset.channel=path;input.addEventListener('change',()=>{if(input.checked){if(this.activeChannels.size>=8){input.checked=false;this.message('同时最多显示 8 个曲线分量。');return;}this.activeChannels.add(path);this.activeChannel=path;}else this.activeChannels.delete(path);this.fitValues();this.drawChannels();this.drawCurve();this.updateSelection();});const dot=node('span','sequence-channel-dot');dot.style.background=colors[index%colors.length];row.append(input,dot,node('span','',path?label(path):label(track.property)));this.channelList.append(row);}
+    this.channelList.append(action('框住曲线 F',()=>{this.fitValues();this.drawCurve();},'layout-curve-fit'),node('p','sequence-channel-note','拖圆点修改时间 / 数值。选中后拖切线调整速度；Alt 拖切线分离两侧。双击空白添加关键帧。'));
   }
-
-  setTime(time){
-    this.time=time;this.timeInput.value=time;
-    this.timeOutput.textContent=`${time.toFixed(2)} / ${this.scene?.sequence.duration.toFixed(1) || '0.0'} 秒`;
-    if(this.scene)for(const playhead of this.rows.querySelectorAll('.previs-track-playhead'))playhead.style.left=time/this.scene.sequence.duration*100+'%';
+  graphBox(){const width=Math.max(200,this.curveArea.clientWidth),height=Math.max(180,this.curveArea.clientHeight);return{width,height,left:64,right:width-22,top:34,bottom:height-28};}
+  graphPoint(time,value,b=this.graphBox()){return{x:b.left+(time-this.view.start)/(this.view.end-this.view.start)*(b.right-b.left),y:b.bottom-(value-this.valueView.min)/(this.valueView.max-this.valueView.min)*(b.bottom-b.top)};}
+  graphValue(x,y){const bounds=this.graph.getBoundingClientRect(),b=this.graphBox();return{time:this.view.start+(x-bounds.left-b.left)/(b.right-b.left)*(this.view.end-this.view.start),value:this.valueView.min+(b.bottom-y+bounds.top)/(b.bottom-b.top)*(this.valueView.max-this.valueView.min)};}
+  drawCurve(){
+    if(!this.scene||this.mode!=='curves')return;const b=this.graphBox();this.graph.setAttribute('viewBox',`0 0 ${b.width} ${b.height}`);this.graph.replaceChildren();
+    for(const tick of this.ticks(b.right-b.left)){const p=this.graphPoint(tick.time,0,b);this.graph.append(svg('line',{x1:p.x,y1:b.top,x2:p.x,y2:b.bottom,class:'sequence-curve-grid'}));const text=svg('text',{x:p.x+4,y:20,class:'sequence-curve-label'});text.textContent=tick.label;this.graph.append(text);}
+    for(let i=0;i<=5;i++){const value=this.valueView.min+(this.valueView.max-this.valueView.min)*i/5,p=this.graphPoint(0,value,b);this.graph.append(svg('line',{x1:b.left,y1:p.y,x2:b.right,y2:p.y,class:'sequence-curve-grid'}));const text=svg('text',{x:b.left-9,y:p.y+4,'text-anchor':'end',class:'sequence-curve-label'});text.textContent=Number(value.toPrecision(4));this.graph.append(text);}
+    const defs=svg('defs'),clip=svg('clipPath',{id:'lumen-curve-clip'});clip.append(svg('rect',{x:b.left,y:b.top,width:b.right-b.left,height:b.bottom-b.top}));defs.append(clip);this.graph.append(defs);const content=svg('g',{'clip-path':'url(#lumen-curve-clip)'});this.graph.append(content);
+    const track=this.findTrack(this.activeTrack),channels=numericChannels(track);if(!track||!channels.length){const text=svg('text',{x:b.width/2,y:b.height/2,'text-anchor':'middle',class:'sequence-curve-label'});text.textContent='选择位置、旋转、焦距、表情或材质数值轨道';this.graph.append(text);return;}
+    for(const path of this.activeChannels){if(!channels.includes(path))continue;const color=colors[channels.indexOf(path)%colors.length];let d='';const steps=Math.min(600,Math.max(160,Math.round((b.right-b.left)/2)));for(let i=0;i<=steps;i++){const at=this.view.start+(this.view.end-this.view.start)*i/steps,p=this.graphPoint(at,sampleChannel(track,at,path),b);d+=(i?'L':'M')+p.x.toFixed(3)+' '+p.y.toFixed(3);}content.append(svg('path',{d,fill:'none',stroke:color,'stroke-width':2.3,class:'sequence-curve-line','data-channel':path}));
+      for(const [index,key]of track.keys.entries()){const p=this.graphPoint(key.time,channelValue(key.value,path),b),selected=this.selectedKeys.has(track.id+':'+key.id);
+        if(selected&&path===this.activeChannel&&['auto','user','break'].includes(key.curves?.[path]?.mode))for(const side of ['in','out']){if(side==='in'&&!index||side==='out'&&index===track.keys.length-1)continue;const handle=segmentHandles(track,side==='in'?index-1:index,path)[side],sign=side==='in'?-1:1,h=this.graphPoint(key.time+handle.dt*sign,channelValue(key.value,path)+handle.dv*sign,b);content.append(svg('line',{x1:p.x,y1:p.y,x2:h.x,y2:h.y,stroke:color,class:'sequence-tangent-line'}));const dot=svg('circle',{cx:h.x,cy:h.y,r:7,fill:color,class:'sequence-tangent-handle','data-handle':side,'data-key-id':key.id,'data-channel':path});dot.addEventListener('pointerdown',e=>this.beginTangent(e,track,index,path,side));content.append(dot);}
+        const dot=svg('circle',{cx:p.x,cy:p.y,r:selected?8:6.5,fill:selected?'#fff':color,stroke:color,'stroke-width':selected?3:1,class:'sequence-curve-key'+(selected?' selected':''),'data-key-id':key.id,'data-channel':path});dot.addEventListener('pointerdown',e=>this.beginKeyDrag(e,track,key,path));content.append(dot);
+      }
+    }const p=this.graphPoint(this.time,0,b);content.append(svg('line',{x1:p.x,y1:b.top,x2:p.x,y2:b.bottom,class:'sequence-curve-playhead'}));
   }
-  setPlaying(playing){this.play.textContent=playing?'暂停 Space':'播放 Space';}
+  updateSelection(){const items=[...this.selectedKeys.values()],first=items[0],key=this.findKey(first),track=first&&this.findTrack(first.trackId),channels=numericChannels(track),path=track?.id===this.activeTrack&&channels.includes(this.activeChannel)?this.activeChannel:channels[0];this.selectionLabel.textContent=items.length?`已选 ${items.length} 帧`:'未选择关键帧';this.keyTime.disabled=this.delete.disabled=!key;this.keyValue.disabled=this.interpolation.disabled=!key||path===undefined;this.keyTime.value=key?.time??0;this.keyValue.value=key&&path!==undefined?Number(channelValue(key.value,path).toFixed(6)):'';this.interpolation.value=key?.curves?.[path]?.mode||((key?.interpolation||track?.interpolation)==='smooth'?'legacy-smooth':(key?.interpolation||track?.interpolation)==='step'?'constant':'linear');}
+  setMode(mode){const edits=[];for(const item of this.selectedKeys.values()){const track=this.findTrack(item.trackId),key=this.findKey(item),channels=numericChannels(track),paths=this.mode==='curves'&&track.id===this.activeTrack?[this.activeChannel]:channels;if(!channels.length)continue;const curves=copy(key.curves||{});for(const path of paths)if(channels.includes(path)){if(mode==='legacy-smooth')delete curves[path];else{const index=track.keys.indexOf(key);curves[path]={mode};if(['user','break'].includes(mode)){curves[path].in=tangentHandle(track,index,path,'in');curves[path].out=tangentHandle(track,index,path,'out');}}}edits.push({...item,curves,...(mode==='legacy-smooth'?{interpolation:'smooth'}:{})});}if(edits.length)this.api.editKeys(edits);}
+  setSelectedValue(value){const edits=[];for(const item of this.selectedKeys.values()){const track=this.findTrack(item.trackId),key=this.findKey(item),channels=numericChannels(track),path=track.id===this.activeTrack&&channels.includes(this.activeChannel)?this.activeChannel:channels[0];if(path!==undefined)edits.push({...item,value:setChannelValue(key.value,path,value)});}if(edits.length)this.api.editKeys(edits);}
+  shiftSelection(delta){const items=[...this.selectedKeys.values()].map(item=>({...item,time:this.findKey(item).time}));if(!items.length)return;delta=clamp(delta,-Math.min(...items.map(i=>i.time)),this.scene.sequence.duration-Math.max(...items.map(i=>i.time)));this.api.editKeys(items.map(item=>({...item,time:item.time+delta})));}
+  deleteSelected(){if(this.selectedKeys.size)this.api.removeKeys([...this.selectedKeys.values()]);this.selectedKeys.clear();this.updateSelection();}
+  copySelected(){this.clipboard=[...this.selectedKeys.values()].map(item=>{const track=this.findTrack(item.trackId);return{trackId:track.id,targetId:track.targetId,property:track.property,interpolation:track.interpolation,key:copy(this.findKey(item))};});this.message(`已复制 ${this.clipboard.length} 个关键帧；粘贴从播放头开始，保留原轨道。`);}
+  pasteSelected(){if(!this.clipboard.length){this.message('先选择关键帧并复制。');return;}const first=Math.min(...this.clipboard.map(e=>e.key.time)),at=this.snapTime(this.time);this.api.pasteKeys(this.clipboard.map(e=>({...copy(e),key:{...copy(e.key),time:e.key.time-first+at}})));}
+  previousKey(direction){const times=[...new Set(this.scene.sequence.tracks.filter(t=>!t.muted).flatMap(t=>t.keys.map(k=>k.time)))].sort((a,b)=>a-b),next=direction>0?times.find(t=>t>this.time+1e-6):times.findLast(t=>t<this.time-1e-6);this.seek(next??(direction>0?this.scene.sequence.duration:0));}
+  onKey(e){if(e.target.closest('input,textarea,select,[contenteditable="true"]'))return;const ctrl=e.ctrlKey||e.metaKey,key=e.key.toLowerCase();let handled=true;if(ctrl&&key==='z')this.api.undo?.(e.shiftKey);else if(ctrl&&key==='y')this.api.undo?.(true);else if(ctrl&&key==='c')this.copySelected();else if(ctrl&&key==='x'){this.copySelected();this.deleteSelected();}else if(ctrl&&key==='v')this.pasteSelected();else if(ctrl&&key==='a'){for(const track of this.scene.sequence.tracks)for(const key of track.keys)this.selectedKeys.set(track.id+':'+key.id,{trackId:track.id,keyId:key.id});this.render(this.scene,this.time);}else if(key===' ')this.api.play();else if(key==='k')this.api.stop?.();else if(key==='home')this.fit();else if(key==='f'){this.fitValues();this.drawCurve();}else if(key==='delete'||key==='backspace')this.deleteSelected();else if(key==='arrowleft'||key==='arrowright'){const delta=(key==='arrowleft'?-1:1)*(e.shiftKey?10:1)/this.scene.sequence.fps;if(ctrl&&this.selectedKeys.size)this.shiftSelection(delta);else this.seek(Math.round(this.time*this.scene.sequence.fps)/this.scene.sequence.fps+delta);}else if(key==='arrowup'||key===','){ctrl?this.seek(0):this.previousKey(-1);}else if(key==='arrowdown'||key==='.'){ctrl?this.seek(this.scene.sequence.duration):this.previousKey(1);}else if(key==='escape'&&this.cancelGesture)this.cancelGesture();else handled=false;if(handled){e.preventDefault();e.stopPropagation();}}
+  onWheel(e){if(!this.scene)return;if(e.altKey){e.preventDefault();e.stopPropagation();const bounds=this.mode==='curves'?this.graph.getBoundingClientRect():this.ruler.getBoundingClientRect(),b=this.mode==='curves'?this.graphBox():{left:0,right:bounds.width},ratio=clamp((e.clientX-bounds.left-b.left)/(b.right-b.left),0,1),span=this.view.end-this.view.start,anchor=this.view.start+ratio*span,next=clamp(span*Math.exp(e.deltaY*.0015),2/this.scene.sequence.fps,this.scene.sequence.duration*4);this.view={start:anchor-ratio*next,end:anchor+(1-ratio)*next};this.drawTracks();this.drawCurve();}else if(e.shiftKey){e.preventDefault();const delta=(e.deltaY||e.deltaX)/500*(this.view.end-this.view.start);this.view.start+=delta;this.view.end+=delta;this.drawTracks();this.drawCurve();}}
+  listenGesture(move,finish,cancel){this.drag=true;const end=e=>{cleanup();finish(e);},abort=()=>{cleanup();cancel();},cleanup=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',end);window.removeEventListener('pointercancel',abort);window.removeEventListener('blur',abort);this.drag=null;this.cancelGesture=null;};this.cancelGesture=abort;window.addEventListener('pointermove',move);window.addEventListener('pointerup',end,{once:true});window.addEventListener('pointercancel',abort,{once:true});window.addEventListener('blur',abort,{once:true});}
+  beginPan(e){e.preventDefault();e.stopPropagation();const x=e.clientX,view={...this.view},width=this.mode==='curves'?this.graphBox().right-this.graphBox().left:this.ruler.clientWidth;this.listenGesture(next=>{const delta=(next.clientX-x)/width*(view.end-view.start);this.view={start:view.start-delta,end:view.end-delta};this.drawTracks();this.drawCurve();},()=>{},()=>{this.view=view;this.drawTracks();this.drawCurve();});}
+  beginScrub(e,strip){e.preventDefault();this.api.stop?.();const box=strip.getBoundingClientRect(),move=next=>this.api.seek(clamp(this.snapTime(this.timeAt(next.clientX,box)),0,this.scene.sequence.duration));move(e);this.listenGesture(move,()=>{},()=>{});}
+  beginKeyDrag(e,track,key,path){
+    if(e.button!==0)return;e.preventDefault();e.stopPropagation();this.mount.focus({preventScroll:true});this.api.stop?.();const id=track.id+':'+key.id;if(e.shiftKey&&this.selectedKeys.has(id)){this.selectedKeys.delete(id);this.render(this.scene,this.time);return;}if(!this.selectedKeys.has(id)){if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey)this.selectedKeys.clear();this.selectedKeys.set(id,{trackId:track.id,keyId:key.id});}if(track.id!==this.activeTrack)this.selectTrack(track);if(path!==undefined)this.activeChannel=path;
+    const original=[...this.selectedKeys.values()].map(item=>({...item,key:copy(this.findKey(item))})),start={x:e.clientX,y:e.clientY},graph=this.mode==='curves',width=graph?this.graphBox().right-this.graphBox().left:this.ruler.clientWidth,lower=-Math.min(...original.map(i=>i.key.time)),upper=this.scene.sequence.duration-Math.max(...original.map(i=>i.key.time));let edits=[],moved=false;this.previewTracks=copy(this.scene.sequence.tracks);this.updateSelection();this.drawTracks();this.drawCurve();
+    const move=next=>{moved ||= Math.hypot(next.clientX-start.x,next.clientY-start.y)>3;let delta=(next.clientX-start.x)/width*(this.view.end-this.view.start);if(this.snap)delta=Math.round(delta*this.scene.sequence.fps)/this.scene.sequence.fps;delta=clamp(delta,lower,upper);const dv=graph&&path!==undefined?-(next.clientY-start.y)/(this.graphBox().bottom-this.graphBox().top)*(this.valueView.max-this.valueView.min):0;edits=original.map(i=>({...i,time:i.key.time+delta,...(graph&&i.trackId===track.id&&path!==undefined?{value:setChannelValue(i.key.value,path,channelValue(i.key.value,path)+dv)}:{})}));for(const edit of edits){const target=this.findKey(edit);target.time=edit.time;if(edit.value!==undefined)target.value=edit.value;}for(const row of this.previewTracks)row.keys.sort((a,b)=>a.time-b.time);this.drawTracks();this.drawCurve();};
+    this.listenGesture(move,()=>{this.previewTracks=null;if(moved)this.api.editKeys(edits.map(({key,...edit})=>edit));else{if(!e.shiftKey&&!e.ctrlKey&&!e.metaKey){this.selectedKeys.clear();this.selectedKeys.set(id,{trackId:track.id,keyId:key.id});}this.api.seek(key.time);}this.render(this.scene,this.time);},()=>{this.previewTracks=null;this.render(this.scene,this.time);});
+  }
+  beginTangent(e,track,index,path,side){if(e.button!==0)return;e.preventDefault();e.stopPropagation();this.mount.focus({preventScroll:true});this.api.stop?.();const key=track.keys[index],original=copy(track),value=channelValue(key.value,path);let curves=copy(key.curves||{});this.previewTracks=copy(this.scene.sequence.tracks);this.listenGesture(next=>{const point=this.graphValue(next.clientX,next.clientY),sign=side==='in'?-1:1;curves=editTangent(original,index,path,side,{dt:Math.max(.000001,(point.time-key.time)*sign),dv:(point.value-value)*sign},next.altKey);this.findTrack(track.id).keys.find(k=>k.id===key.id).curves=curves;this.drawCurve();},()=>{this.previewTracks=null;this.api.editKeys([{trackId:track.id,keyId:key.id,curves}]);this.render(this.scene,this.time);},()=>{this.previewTracks=null;this.render(this.scene,this.time);});}
+  beginMarquee(e,graph){e.preventDefault();this.api.stop?.();const initial=e.shiftKey||e.ctrlKey||e.metaKey?new Map(this.selectedKeys):new Map(),start={x:e.clientX,y:e.clientY};let moved=false;const rectangle=node('div','sequence-marquee');this.mount.append(rectangle);const bounds=this.mount.getBoundingClientRect();this.listenGesture(next=>{moved ||= Math.hypot(next.clientX-start.x,next.clientY-start.y)>4;const left=Math.min(start.x,next.clientX),right=Math.max(start.x,next.clientX),top=Math.min(start.y,next.clientY),bottom=Math.max(start.y,next.clientY);Object.assign(rectangle.style,{left:left-bounds.left+'px',top:top-bounds.top+'px',width:right-left+'px',height:bottom-top+'px'});this.selectedKeys=new Map(initial);for(const element of(graph?this.graph:this.rows).querySelectorAll(graph?'.sequence-curve-key':'.previs-key-diamond')){const b=element.getBoundingClientRect(),x=(b.left+b.right)/2,y=(b.top+b.bottom)/2,trackId=graph?this.activeTrack:element.closest('[data-track-id]').dataset.trackId;if(x>=left&&x<=right&&y>=top&&y<=bottom)this.selectedKeys.set(trackId+':'+element.dataset.keyId,{trackId,keyId:element.dataset.keyId});element.classList.toggle('selected',this.selectedKeys.has(trackId+':'+element.dataset.keyId));}this.updateSelection();},()=>{rectangle.remove();if(!moved){this.selectedKeys=initial;const at=graph?this.graphValue(e.clientX,e.clientY).time:this.timeAt(e.clientX,this.ruler.getBoundingClientRect());this.seek(this.snapTime(at));}this.render(this.scene,this.time);},()=>{rectangle.remove();this.selectedKeys=initial;this.render(this.scene,this.time);});}
+  addCurveKey(e){const track=this.findTrack(this.activeTrack);if(!track||!numericChannels(track).includes(this.activeChannel))return;const point=this.graphValue(e.clientX,e.clientY),time=clamp(this.snapTime(point.time),0,this.scene.sequence.duration),nearest=track.keys.reduce((best,key)=>Math.abs(key.time-time)<Math.abs(best.time-time)?key:best,track.keys[0]);let value=copy(nearest.value);for(const path of numericChannels(track))value=setChannelValue(value,path,sampleChannel(track,time,path));value=setChannelValue(value,this.activeChannel,point.value);this.api.pasteKeys([{trackId:track.id,targetId:track.targetId,property:track.property,key:{time,value,curves:{[this.activeChannel]:{mode:'auto'}}}}]);}
+  setTime(time){this.time=time;this.timeInput.value=time;this.timeOutput.textContent=`${Math.round(time*(this.scene?.sequence.fps||24))}f  /  ${time.toFixed(2)} s`;if(this.scene){for(const head of this.rows.querySelectorAll('.previs-track-playhead,.sequence-ruler-head'))head.style.left=this.percent(time)+'%';const line=this.graph.querySelector('.sequence-curve-playhead');if(line){const p=this.graphPoint(time,0);line.setAttribute('x1',p.x);line.setAttribute('x2',p.x);}}}
+  setPlaying(playing){this.play.textContent=playing?'Ⅱ 暂停':'▶ 播放';}
+  dispose(){this.cancelGesture?.();this.observer.disconnect();}
 }

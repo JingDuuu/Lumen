@@ -284,6 +284,16 @@ class AssetPresetStore:
                     item["layout"] = replace_urls(item["layout"], models)
                 item["preset_id"] = preset_id
                 item["preset_name"] = preset["name"]
+                item["asset_id"] = preset_id
+                item["asset_name"] = preset["name"]
+                item["asset_enabled"] = True
+                if preset["category"] == "character":
+                    item["character_id"] = preset_id
+                    item["character_name"] = preset["name"]
+                    if item["kind"] == "text" and item.get("role") == "extra":
+                        item["role"] = "char"
+                    if item["kind"] != "text":
+                        item["reference_role"] = "character"
             connections = [{**copy.deepcopy(edge),"id":"e"+uuid.uuid4().hex[:16],"from":item_ids[edge["from"]],"to":item_ids[edge["to"]]} for edge in preset["connections"]]
             zones = [{**copy.deepcopy(zone),"id":zone_ids[zone["id"]]} for zone in preset["zones"]]
             return {"ok":True,"name":preset["name"],"category":preset["category"],"items":items,"connections":connections,"zones":zones,"params":copy.deepcopy(preset["params"])}

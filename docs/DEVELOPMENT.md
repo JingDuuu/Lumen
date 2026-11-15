@@ -9,7 +9,7 @@
 | desktop.py / engine_runtime.py | 单实例窗口、进程生命周期与所属进程树 |
 | runtime_config.py | 可移动配置与已有安装兼容 |
 | app.py / tasks.py / lumen_core.py | HTTP、任务验证/进度、工作流与持久化 |
-| reference_inputs.py | 媒体、角色、分区、关系到模型输入的编译 |
+| reference_inputs.py / prompt_compiler.py | 实际媒体输入与可读镜头提示词编译 |
 | asset_presets.py | 命名参考预设、媒体依赖与便携包 |
 | agent_api.py / lumen.py | 机器接口、版本控制和 CLI |
 | model_manager.py / models-manifest.json | 主动下载、固定版本和完整校验 |
@@ -34,6 +34,8 @@
 npm run test:scene
 npm run test:ui
 ```
+
+当前默认 UI 套件验证图版、声音、3D 控件和曲线。旧 `ui_interactions`、`ui_reference_zones`、`ui_preset_library` 是节点画板时期的历史套件，不属于新版默认验收。
 
 浏览器测试启动隔离的 Flask fixture，退出后清理临时目录。截图与检查结果进入被忽略的 `diagnostics/`。不要将真实用户画板截图作为公开附件。
 

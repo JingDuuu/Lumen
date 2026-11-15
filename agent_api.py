@@ -44,7 +44,10 @@ def json_object():
 
 
 def require_revision(data, revision):
-    expected = request.headers.get("If-Match", data.get("expected_revision", "")).strip('"')
+    expected = request.headers.get("If-Match", data.get("expected_revision", ""))
+    if not isinstance(expected, str):
+        raise AgentError("INVALID_INPUT", "expected_revision 须为文本")
+    expected = expected.strip('"')
     if not expected:
         raise AgentError("PRECONDITION_REQUIRED", "先读取当前 revision，再提交 expected_revision 或 If-Match", 428,
                          current_revision=revision)
@@ -159,6 +162,36 @@ def apply_operations(board, operations):
     return validate_board(board)
 
 
+def validate_curves(key, property_path):
+    if "curves" not in key:
+        return
+    curves = key["curves"]
+    if not isinstance(curves, dict):
+        raise AgentError("INVALID_INPUT", "关键帧 curves 须为分量路径到切线的对象")
+    for path, spec in curves.items():
+        parts = path.split(".") if path else []
+        if any(not re.fullmatch(r"[\w-]+", part) or part in {"__proto__", "prototype", "constructor"} for part in parts):
+            raise AgentError("INVALID_INPUT", "曲线分量路径无效")
+        if re.search(r"(^|\.)(parentId|visible|hands|hdri|background|enabled|clip|quaternion)(\.|$)", property_path + "." + path):
+            raise AgentError("INVALID_INPUT", "离散属性与四元数不支持数值曲线")
+        value = key["value"]
+        try:
+            for part in parts:
+                value = value[int(part)] if isinstance(value, list) and part.isdigit() else value[part]
+        except (KeyError, IndexError, TypeError):
+            raise AgentError("INVALID_INPUT", "曲线分量不存在")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise AgentError("INVALID_INPUT", "曲线只能控制数值分量")
+        if not isinstance(spec, dict) or spec.get("mode") not in {"auto", "user", "break", "linear", "constant"}:
+            raise AgentError("INVALID_INPUT", "曲线切线模式无效")
+        for side in ("in", "out"):
+            if side not in spec:
+                continue
+            handle = spec[side]
+            if not isinstance(handle, dict) or any(isinstance(handle.get(k), bool) or not isinstance(handle.get(k), (int, float)) for k in ("dt", "dv")) or not 0 <= handle["dt"] <= 1e6 or abs(handle["dv"]) > 1e12:
+                raise AgentError("INVALID_INPUT", "切线须包含有效的 dt/dv，时间权重不得为负")
+
+
 def validate_scene(scene):
     """Reject unrenderable agent documents before collecting/persisting assets."""
     if not isinstance(scene, dict) or scene.get("version") != 3 or not isinstance(scene.get("objects"), list):
@@ -209,6 +242,7 @@ def validate_scene(scene):
         for key in keys:
             if not isinstance(key, dict) or "value" not in key or not isinstance(key.get("time"), (int, float)) or not 0 <= key["time"] <= duration:
                 raise AgentError("INVALID_INPUT", "关键帧须包含 value 和范围内 time")
+            validate_curves(key, path)
             if path == "parentId" and (key["value"] is not None and (not isinstance(key["value"], str) or key["value"] not in parents)):
                 raise AgentError("INVALID_INPUT", "动态父级不存在")
         if path == "parentId" and keys and not track.get("muted"):
@@ -381,11 +415,14 @@ def create_blueprint(board_path, board_lock):
     def discover():
         endpoints = [{"path": rule.rule, "methods": sorted(rule.methods - {"OPTIONS", "HEAD"})}
                      for rule in current_app.url_map.iter_rules() if rule.rule.startswith("/api/")]
-        return jsonify(ok=True, api_version="1.0", application="Lumen", transport="loopback HTTP JSON + multipart",
+        return jsonify(ok=True, api_version="1.1", application="Lumen", transport="loopback HTTP JSON + multipart; local MCP stdio",
+                       bootstrap="/api/agent/bootstrap", generation="/api/agent/generate",
                        schema="/api/agent/schema", catalog="/api/agent/catalog", guide="/api/agent/guide",
                        examples={name:"/api/agent/examples/" + name for name in ("board", "board-operations", "animated-prefab")},
                        endpoints=sorted(endpoints, key=lambda e: e["path"]),
                        contracts={"POST /api/agent/preview":{"request":"Board or BoardOperations","response":"{board,estimate,writes_board:false,submits_generation:false}"},
+                                  "POST /api/agent/generate":{"request":"request_id + (board | use_current_board:true + expected_revision | prompt + preset_ids? + params?) + client_name? + title?", "response":"{record_id,prompt_id,task,replayed,result_url}"},
+                                  "GET /api/agent/jobs/<id>/result":{"request":"record_id", "response":"{ready,status,files:[{local_path,url,download_url,mime_type,size_bytes}],missing_outputs}; ready only for done + existing nonempty files"},
                                   "PUT /api/agent/board":{"request":"BoardWrite","response":"{board,revision,replayed,applied_revision}"},
                                   "POST /api/agent/board/operations":{"request":"BoardOperations","response":"{board,revision,replayed,applied_revision}"},
                                   "POST /api/agent/documents":{"request":"DocumentWrite","response":"{id,revision,replayed}"},

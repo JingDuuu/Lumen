@@ -1,0 +1,41 @@
+/* Details controls: larger targets without changing scene/timeline layout. */
+#layout-editor,#layout-editor * {box-sizing:border-box;}
+#layout-editor .previs-toolbar .previs-button {min-height:42px;font-size:16px!important;padding:8px 11px;}
+.previs-camera-tools {display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 11px;background:#102138;border-bottom:1px solid #b9dcff22;}
+.previs-camera-tools .previs-button {font-size:16px!important;min-height:42px;padding:7px 11px;}
+.previs-camera-tools .previs-button .previs-icon {width:21px;height:21px;}
+.previs-camera-tools .previs-button.active {background:#6db4eb32;border-color:#98d5ff;}
+.previs-detail-toolbar {display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 14px;}
+.previs-detail-toolbar button {flex:1;}
+#layout-editor .previs-file-actions>.btn {min-height:42px;padding:8px 13px;border:1px solid #b7d9ff35;border-radius:9px;color:#d3e7fc;background:#8cbfff0b;font-size:16px;}
+#layout-editor .previs-file-actions>.btn:hover {background:#a3d3ff16;border-color:#c6e8ff56;}
+#layout-editor .previs-property>label,#layout-editor .previs-vector-heading h4 {font-size:16px;}
+#layout-editor .previs-section>summary {font-size:17px;min-height:46px;}
+.previs-number {position:relative;min-width:0;isolation:isolate;}
+#layout-editor .previs-number input {width:100%;min-height:44px;font-size:17px;cursor:ew-resize;padding:8px 9px;font-variant-numeric:tabular-nums;appearance:textfield;background:#071728bc;position:relative;z-index:1;}
+#layout-editor .previs-number input:focus {cursor:text;}
+.previs-number input::-webkit-inner-spin-button,.previs-number input::-webkit-outer-spin-button {appearance:none;margin:0;}
+.previs-number-bar {position:absolute;bottom:2px;left:3px;right:3px;height:4px;border-radius:3px;overflow:hidden;pointer-events:none;opacity:0;z-index:2;background:#c0e4ff24;transition:opacity 150ms;}
+.previs-number-bar::after {content:'';display:block;width:var(--amount,50%);height:100%;background:#a0dfff;}
+.previs-number:hover .previs-number-bar,.previs-number.scrubbing .previs-number-bar {opacity:1;}
+.previs-number.scrubbing input {border-color:#bceaff!important;background:#184062!important;}
+.previs-scrubbing,.previs-scrubbing * {cursor:ew-resize!important;user-select:none!important;}
+.previs-value-ladder {position:fixed;z-index:9999;width:98px;padding:5px;border:1px solid #cae9ff6b;border-radius:10px;background:#142d45f5;box-shadow:0 12px 42px #0008;pointer-events:none;}
+.previs-value-ladder>div {height:30px;display:flex;align-items:center;padding:0 12px;font:500 17px system-ui;color:#9ebbd9;border-radius:5px;}
+.previs-value-ladder>div.active {color:#071727;background:#b4e6ff;}
+#layout-editor .previs-property-actions>.previs-icon-button {width:30px;min-width:30px;height:36px;}
+#layout-editor .previs-key-button {height:34px;min-width:24px;font-size:14px;}
+#layout-editor .previs-vector>.previs-property {grid-template-columns:12px minmax(0,1fr) 24px;gap:3px;min-width:0;}
+#layout-editor .previs-vector .previs-property-actions {min-width:0;width:24px;}
+#layout-editor .previs-vector .previs-key-button {width:24px;min-width:24px;max-width:24px;padding:0;}
+#layout-editor .previs-vector .previs-number input {padding-inline:4px;}
+.previs-control-hint {font-size:13px!important;color:#8daac7;line-height:1.55;padding:8px 0 12px;}
+.previs-reference-card {padding:12px;border:1px solid #a0d8ff35;border-radius:10px;background:#a0c9ff08;margin:10px 0;}
+.previs-reference-card img {width:100%;max-height:170px;object-fit:contain;border-radius:6px;background:#081421;}
+.previs-reference-card p {font-size:14px;line-height:1.55;color:#a7bfd9;margin-top:8px!important;}
+.previs-character-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding-bottom:12px;}
+.previs-character-grid .previs-asset {height:auto;min-height:140px;}
+.previs-character-grid img {object-fit:cover;max-height:120px;}
+.previs-rail-row.selected {outline:1px solid #a7dcff;border-radius:8px;background:#8ac9ff0c;}
+@media(max-width:1150px){.previs-camera-tools{gap:5px;padding:6px;}.previs-camera-tools .previs-button{font-size:15px!important;min-height:40px;padding:6px 8px;}#layout-editor .previs-vector>.previs-property{grid-template-columns:10px minmax(0,1fr) 22px;gap:2px;}#layout-editor .previs-vector .previs-property-actions{width:22px;}#layout-editor .previs-vector .previs-key-button{min-width:22px;width:22px;max-width:22px;}.previs-camera-tools .previs-icon{display:none;}}
+@media(prefers-reduced-motion:reduce){.previs-number-bar{transition:none;}}

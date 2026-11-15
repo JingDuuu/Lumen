@@ -5,6 +5,7 @@ import { GLTFExporter } from './vendor/three/examples/jsm/exporters/GLTFExporter
 import { GLTFLoader } from './vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { createAsset, applyRig, applyMaterial, disposeAsset } from './layout-assets.js';
 import { normalizeScene, evaluateScene, worldMatrix } from './layout-scene.js';
+import { createReferenceImage } from './layout-reference.js';
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 0));
 const abort = signal => { if (signal?.aborted) throw new DOMException('已取消导出', 'AbortError'); };
@@ -59,7 +60,8 @@ export async function exportSceneGLB(input, {fps=24, includeAnimation=true, onPr
   try {
     for(let i=0;i<data.objects.length;i++) {
       abort(signal); const record=data.objects[i]; let root;
-      if(record.type==='imported') {
+      if(record.reference?.kind==='image') root=await createReferenceImage(record);
+      else if(record.type==='imported') {
         const gltf=await new GLTFLoader().loadAsync(assetURL(record.asset?.url)),sourceRoot=gltf.scene;
         root=new THREE.Group();root.add(sourceRoot);
         if(gltf.animations.length) {
@@ -83,7 +85,7 @@ export async function exportSceneGLB(input, {fps=24, includeAnimation=true, onPr
       abort(signal); const time=includeAnimation?Math.min(data.sequence.duration,frame/rate):0,at=evaluateScene(data,time),cache=new Map();times.push(time);
       for(let i=0;i<at.objects.length;i++) {
         const record=at.objects[i],root=roots.get(record.id);
-        if(!['group','imported','camera','point_light','spot_light','directional_light'].includes(record.type)) {
+        if(record.reference?.kind!=='image'&&!['group','imported','camera','point_light','spot_light','directional_light'].includes(record.type)) {
           applyRig(root,record);prepareNames(root,'Lumen_'+i);
         }
         const state=mixers.get(record.id);
@@ -126,7 +128,7 @@ export async function exportSceneGLB(input, {fps=24, includeAnimation=true, onPr
     const first=evaluateScene(data,0);
     first.objects.forEach((record,i)=>{
       const root=roots.get(record.id);
-      if(!['group','imported','camera','point_light','spot_light','directional_light'].includes(record.type)){applyRig(root,record);prepareNames(root,'Lumen_'+i);}
+      if(record.reference?.kind!=='image'&&!['group','imported','camera','point_light','spot_light','directional_light'].includes(record.type)){applyRig(root,record);prepareNames(root,'Lumen_'+i);}
       else if(record.type==='imported'&&record.asset?.materialOverride)applyMaterial(root,record.material);
       else if(record.type.endsWith('_light')){root.color.set(record.light?.color||record.color||'#ffffff');root.intensity=record.light?.intensity??record.intensity??3;}
       else if(record.type==='camera'){root.setFocalLength(record.focal||35);root.near=record.near||.05;root.far=record.far||1000;root.updateProjectionMatrix();}
@@ -144,6 +146,7 @@ export async function exportSceneGLB(input, {fps=24, includeAnimation=true, onPr
     camera.setFocalLength(first.camera.focal);
     camera.near=first.camera.near;camera.far=first.camera.far;camera.updateProjectionMatrix();
     scene.userData.lumenPrevis={version:1,fps:rate,duration:includeAnimation?data.sequence.duration:0,camera:[{node:'Lumen_ShotCamera',keys:cameraSamples}],warnings,
+      characters:data.objects.filter(o=>o.character_id).map(o=>({node:'Lumen_'+data.objects.indexOf(o)+'_0',character_id:o.character_id,asset_id:o.asset_id,reference:o.reference})),
       additionalTracks:data.sequence.tracks.filter(t=>['environment','scene'].includes(t.targetId)||/^(material|color)(\.|$)/.test(t.property)||data.objects.some(o=>o.id===t.targetId&&(o.type.endsWith('_light')||o.type==='camera'))&&!/^(position|rotation|scale|parentId|visible)(\.|$)/.test(t.property)),
       limitations:['HDR is stored in the Lumen scene.','Material animation is not supported by standard glTF.','Animated parents are baked into world-space transforms.']};
     const animations=tracks.length?[new THREE.AnimationClip('Lumen_Previs',data.sequence.duration,tracks)]:[];

@@ -37,6 +37,20 @@ CLI installation is also available: `Install-H3.cmd -Pack fl2va`, `-Pack ref2va`
 
 Back up the configured data directory and input/output media. Models can stay separate. To move a portable install, update absolute paths or use the relative example, then rerun `install_desktop.ps1` to point the shortcut at the new folder.
 
+## Agent setup on another computer
+
+The CLI, MCP stdio adapter, agent prompt template and board integration are part of this repository. After setup and model installation on the target computer:
+
+1. Open that computer's Lumen and choose **连接 Agent**.
+2. Copy the generated prompt for an agent with local command tools, or merge the generated MCP configuration into the local chat host's MCP settings. Keep its existing services. A host that uses another configuration format needs the same `command`, `args` and `cwd` values in its own format.
+3. Let the agent run `doctor`, then `ensure`, or call `lumen_connect`. Generated files remain in that computer's configured output folder and appear in its Lumen library.
+
+Paths are generated from the current installation. Do not reuse another computer's rendered prompt, MCP configuration or `lumen.local.json`. A standalone install defaults to `.venv/Scripts/python.exe`, `data/input` and `data/output`; an existing-engine configuration can choose different paths. The repository's MCP JSON examples contain explicit `<LUMEN_PYTHON_EXE>` and `<LUMEN_INSTALL_DIR>` placeholders and must be replaced before use. Prefer the ready-to-copy values from the application.
+
+`127.0.0.1` always means the computer running the agent tool, not another PC or a public download service. Pure cloud chat needs a local tool/MCP host. The program does not automatically upload local videos to a chat provider; the host displays or attaches the verified file using its actual capabilities.
+
+Updating the program does not synchronize personal characters, scenes or videos between computers. Export/import reusable preset packages through Lumen, or migrate the configured data/input/output folders deliberately. Keep model weights separate and recheck the destination paths after moving data. See the [Chinese agent quick start](docs/AGENT_QUICKSTART.md).
+
 ## Dependency and license provenance
 
 - [ComfyUI source at the pinned revision](https://github.com/Comfy-Org/ComfyUI/tree/7597a5a0d59ee251674e6c1270049909c63e7ede) is installed as a separate engine and retains its GPL-3.0 license. Lumen communicates with its local HTTP API; this repository does not relicense or redistribute its weights/environment.

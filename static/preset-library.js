@@ -29,7 +29,10 @@ library.id = "reference-preset-library";
 library.setAttribute("aria-labelledby", "reference-library-title");
 const top = el("div", "preset-library-top"),
   title = el("div");
-title.append(el("p", "eyebrow", "本地参考资产"), el("h2", "", "参考预设库"));
+title.append(
+  el("p", "eyebrow", "你的可复用素材"),
+  el("h2", "", "角色与场景库"),
+);
 title.lastChild.id = "reference-library-title";
 const close = el("button", "icon-btn");
 const closeIcon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -177,11 +180,24 @@ async function refresh() {
           `${entry.item_count} 张卡片 · ${entry.connection_count} 条连线 · ${entry.media_count} 份素材`,
         ),
       );
+      const currentItems = window.LumenBoard.getState().items.filter(
+        (item) => item.asset_id === entry.id || item.preset_id === entry.id,
+      );
+      const included = currentItems.some(
+        (item) => item.enabled !== false && item.asset_enabled !== false,
+      );
+      const noMembers =
+        currentItems.length &&
+        !currentItems.some((item) => item.enabled !== false);
       const buttons = el("div", "preset-card-actions"),
-        use = el("button", "btn primary", "加入画板"),
+        use = el(
+          "button",
+          included ? "btn" : "btn primary",
+          included ? "移出镜头" : noMembers ? "选择生成参考" : "加入镜头",
+        ),
         rename = el("button", "btn", "编辑"),
         download = el("a", "text-btn", "导出包"),
-        remove = el("button", "text-btn", "删除");
+        remove = el("button", "text-btn", "删除预设");
       use.type = rename.type = remove.type = "button";
       download.href =
         "/api/asset-presets/" + encodeURIComponent(entry.id) + "/package";
@@ -189,11 +205,27 @@ async function refresh() {
       use.onclick = async () => {
         use.disabled = true;
         try {
-          const payload = await api("/" + entry.id + "/instantiate", {
-            method: "POST",
-          });
-          await window.LumenBoard.addReferencePreset(payload);
-          library.close();
+          if (currentItems.length) {
+            if (
+              !window.LumenBoard.setAssetEnabled(
+                currentItems.map((item) => item.id),
+                !included,
+              )
+            ) {
+              library.close();
+              window.LumenGallery.editAsset(entry.id);
+              return;
+            }
+          } else {
+            const payload = await api("/" + entry.id + "/instantiate", {
+              method: "POST",
+            });
+            await window.LumenBoard.addReferencePreset({
+              ...payload,
+              asset_id: entry.id,
+            });
+          }
+          await refresh();
         } catch (error) {
           setStatus(error.message, true);
         } finally {
@@ -218,6 +250,17 @@ async function refresh() {
       buttons.append(use, rename, download, remove);
       body.append(buttons);
       card.append(preview, body);
+      card.addEventListener("dblclick", (event) => {
+        if (event.target.closest("button,a,input,textarea,select")) return;
+        const items = window.LumenBoard.getState().items.filter(
+          (item) => item.asset_id === entry.id || item.preset_id === entry.id,
+        );
+        if (items.length) {
+          window.LumenBoard.removeItems(items.map((item) => item.id));
+          window.LumenBoard.toast("已移除当前图版中的实例，库中素材保留");
+          refresh();
+        }
+      });
       grid.append(card);
     }
     if (!result.presets.length) {
@@ -330,7 +373,8 @@ importButton.onclick = () => {
   };
   input.click();
 };
-function openLibrary() {
+function openLibrary(options = {}) {
+  if (typeof options.category === "string") category.value = options.category;
   if (!library.open) library.showModal();
   refresh();
   search.focus();

@@ -13,13 +13,14 @@ import {
 import {
   MAX_OBJECTS, normalizeScene, evaluateScene, getValue, setValue, setKey,
   removeKey, moveKey, keyAll, reparent, createGroup, deleteObjects,
-  createPrefab, instantiatePrefab, attachAt, defaultCamera
+  createPrefab, instantiatePrefab, attachAt, defaultCamera, applyKeyEdits, pasteKeys
 } from './layout-scene.js';
 import { exportSceneGLB } from './layout-exchange.js';
 import { mountFileUI } from './layout-file-ui.js';
 import { EditorUI } from './layout-editor-ui.js';
 import { TimelineUI } from './layout-timeline-ui.js';
 import { RailOverlay } from './layout-rail.js';
+import { createReferenceImage } from './layout-reference.js';
 
 const $ = id => document.getElementById(id);
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -50,6 +51,7 @@ let transformBefore = null, transformMatrices = new Map(), pivotBefore = null, h
 let exportCancelled = false, exportStart = 0, exportDuration = 5, saveTimer = 0;
 let editingId = null, editingKind = null, environmentSignature = '', sceneRevision = 0;
 let environmentReady=Promise.resolve();
+let controlGesture=null,railDrag=null,railSelection=-1,pilotId=null;
 
 function initialScene() {
   return normalizeScene({
@@ -62,7 +64,7 @@ function initialScene() {
 }
 
 function cameraRecord(object) {
-  return {position:object.position.toArray(),quaternion:object.quaternion.toArray(),focal:object.getFocalLength()};
+  return {position:object.getWorldPosition(new THREE.Vector3()).toArray(),quaternion:object.getWorldQuaternion(new THREE.Quaternion()).toArray(),focal:object.getFocalLength()};
 }
 
 function putCamera(object, record) {
@@ -75,7 +77,7 @@ function putCamera(object, record) {
   object.updateMatrixWorld();
 }
 
-function activeCamera() { return viewMode === 'camera' ? shotCamera : camera; }
+function activeCamera() { return viewMode==='pilot'?(fly?camera:roots.get(pilotId)?.userData.camera||camera):viewMode === 'camera' ? shotCamera : camera; }
 function selectedId() { return [...selection].at(-1) || null; }
 function objectById(id, source = data) { return source.objects.find(object => object.id === id); }
 function visible(root) { for(let current=root; current&&current!==world; current=current.parent) if(!current.visible)return false; return true; }
@@ -116,6 +118,7 @@ function mutate(run, message) {
   try {
     run();
     data=normalizeScene(data);
+    if(controlGesture){applyState(currentScene());dirty=false;return;}
     remember(before);
     dirty=true;
     refresh(true);
@@ -128,12 +131,27 @@ function mutate(run, message) {
   }
 }
 
+function beginControlGesture() {
+  if(busy||controlGesture)return;
+  stopPlayback();controlGesture={before:snapshot()};
+}
+
+function endControlGesture(cancel=false) {
+  if(!controlGesture)return;
+  const before=controlGesture.before;controlGesture=null;
+  if(cancel)data=before;else remember(before);
+  dirty=true;refresh(true);
+}
+
 async function undo(redo=false) {
   const source=redo?future:history,target=redo?history:future;
   if(!source.length||busy)return;
   stopPlayback();
+  const selected=[...selection];
   target.push(snapshot());
   await installScene(source.pop(),false);
+  selection.clear();for(const id of selected)if(objectById(id))selection.add(id);
+  attachTransform();ui.sync(currentScene(),[...selection],true);
   updateHistory();saveDraft();
 }
 
@@ -174,7 +192,7 @@ function setProperty(id, property, value) {
       if(source?.type==='imported'&&property.startsWith('material.'))source.asset.materialOverride=true;
       syncTrackedProperty(target,property);
     }
-    if(id==='camera')viewMode='camera';
+    if(id==='camera'&&!property.startsWith('rail.points')&&!property.startsWith('rail.lookAt')){pilotId=null;viewMode='camera';}
   });
 }
 
@@ -221,6 +239,72 @@ function addAsset(type) {
     data.objects.push({id,type,label:EDITOR_ASSETS.find(item=>item.id===type)?.label||'对象',position:[0,type.includes('light')?2:0,0],rotation:[0,0,0],scale:[1,1,1],...(type.includes('light')?{light:{color:'#ffffff',intensity:3}}:{}),...(type==='camera'?{focal:35}:{})});
     selection.clear();selection.add(id);
   },'已加入场景。直接拖动角色手脚控制点，或用坐标轴调整对象。');
+}
+
+function newCamera() {
+  mutate(()=>{
+    const record=cameraRecord(activeCamera()),rotation=new THREE.Euler().setFromQuaternion(new THREE.Quaternion(...record.quaternion));
+    const id=crypto.randomUUID();data.objects.push({id,type:'camera',label:`相机 ${data.objects.filter(o=>o.type==='camera').length+1}`,position:record.position,rotation:[rotation.x,rotation.y,rotation.z].map(deg),scale:[1,1,1],focal:record.focal});selection.clear();selection.add(id);
+  },'相机已创建在当前视角。点“进入所选相机”驾驶，或“作为拍摄机位”用于导出。');
+}
+
+function pilotCamera(id=selectedId()) {
+  const record=objectById(id,currentScene());
+  if(record?.type!=='camera'){ui.message('先在层级中选择一台相机，或点击“新建相机”。',true);return;}
+  if(record.locked){ui.message('相机已锁定，请先解锁再驾驶。',true);return;}
+  stopPlayback();pilotId=id;viewMode='pilot';putCamera(camera,cameraRecord(roots.get(id).userData.camera));updateViewUI();
+  ui.message(`正在驾驶「${record.label}」：右键 + WASD / QE 调整相机，脱离后保留位置。`);
+}
+
+function useCamera(id) {
+  const root=roots.get(id);if(!root?.userData.camera)return;
+  mutate(()=>{data.camera={...data.camera,...cameraRecord(root.userData.camera)};data.camera.rail.enabled=false;for(const property of ['position','quaternion','focal'])syncTrackedProperty('camera',property);pilotId=null;viewMode='camera';},'所选相机已作为 H3 输出拍摄机位。');
+}
+
+function updatePilotedCamera() {
+  const root=roots.get(pilotId);if(!root)return;
+  const matrix=new THREE.Matrix4().compose(camera.position,camera.quaternion,new THREE.Vector3(1,1,1));
+  root.parent.updateMatrixWorld(true);matrix.premultiply(root.parent.matrixWorld.clone().invert());
+  const position=new THREE.Vector3(),rotation=new THREE.Quaternion(),scale=new THREE.Vector3();matrix.decompose(position,rotation,scale);
+  const rebuilt=new THREE.Matrix4().compose(position,rotation,scale);
+  if(matrix.elements.some((value,index)=>Math.abs(value-rebuilt.elements[index])>1e-5)){ui.message('父级非均匀缩放会造成相机剪切。请先解除挂接再驾驶。',true);return;}
+  root.position.copy(position);root.quaternion.copy(rotation);root.scale.copy(scale);storeRootTransform(pilotId,root);world.updateMatrixWorld(true);
+}
+
+function createRail(animated) {
+  mutate(()=>{
+    const view=activeCamera(),position=view.getWorldPosition(new THREE.Vector3()),right=new THREE.Vector3(1,0,0).applyQuaternion(view.getWorldQuaternion(new THREE.Quaternion()));
+    if(!data.camera.rail.enabled){data.camera.rail.points=[-2,0,2].map(offset=>position.clone().addScaledVector(right,offset).toArray());data.camera.rail.lookAt=position.clone().addScaledVector(view.getWorldDirection(new THREE.Vector3()),5).toArray();}
+    data.camera.rail.enabled=true;
+    if(animated){setKey(data,'camera','rail.progress',0,0,'smooth');setKey(data,'camera','rail.progress',data.sequence.duration,1,'smooth');}
+    enterFree();selection.clear();railSelection=0;
+  },animated?'导轨相机已建立：进度从起点到终点。拖蓝色控制点修改路线，播放查看镜头。':'样条编辑已开启：直接拖动蓝色点；在属性面板添加/移除控制点。');
+  focusRail();
+  setTimeout(()=>{const rail=$('layout-rail-details');if(rail){rail.open=true;rail.parentElement.open=true;rail.scrollIntoView({block:'nearest'});}},0);
+}
+
+function focusRail() {
+  const points=currentScene().camera.rail.points||[];if(!points.length)return;
+  const box=new THREE.Box3().setFromPoints(points.map(point=>new THREE.Vector3(...point))),center=box.getCenter(new THREE.Vector3());
+  const radius=Math.max(1.2,box.getSize(new THREE.Vector3()).length()/2);
+  enterFree();camera.position.copy(center).addScaledVector(new THREE.Vector3(.65,.5,1).normalize(),radius*3.5);camera.lookAt(center);orbit.target.copy(center);saveDraft();
+}
+
+function getCharacters() {return window.LumenBoard?.getCharacters?.()||[];}
+
+async function addCharacter(character) {
+  if(!ready||!$('layout-dialog').open)await open();
+  if(!character?.image_url){ui.message('此角色没有可用图片参考。',true);return;}
+  if(data.objects.length+2>MAX_OBJECTS){ui.message('场景对象数量已达上限。',true);return;}
+  const identity={character_id:character.character_id,asset_id:character.asset_id};
+  const reference={image_url:character.image_url,name:character.name,description:character.description||'',items:copy(character.items||[])};
+  mutate(()=>{
+    const proxy=crypto.randomUUID(),board=crypto.randomUUID();
+    data.objects.push({id:proxy,type:'adult_female',label:character.name+' · 姿势代理',position:[0,0,0],rotation:[0,0,0],scale:[1,1,1],...identity,reference:{...reference,kind:'proxy'}},
+      {id:board,type:'plane',label:character.name+' · 原图参考',position:[-1.6,1.1,0],rotation:[0,0,0],scale:[1,1,1],...identity,reference:{...reference,kind:'image'}});
+    selection.clear();selection.add(proxy);selection.add(board);
+  },'已加入原始图片和可摆姿势的人体代理。代理用于构图，不是精确三维重建。');
+  await refresh(true);focusSelection();
 }
 
 function duplicate() {
@@ -298,7 +382,7 @@ async function ensureObjects(state) {
   }
   const revision=sceneRevision;
   for(const record of state.objects)if(!roots.has(record.id)){
-    const root=record.type==='group'?new THREE.Group():record.type==='imported'?await importedRoot(record):EXTRA_ASSETS.some(asset=>asset.id===record.type)?editorAsset(record):createAsset(record.type,record);
+    const root=record.reference?.kind==='image'?await createReferenceImage(record):record.type==='group'?new THREE.Group():record.type==='imported'?await importedRoot(record):EXTRA_ASSETS.some(asset=>asset.id===record.type)?editorAsset(record):createAsset(record.type,record);
     if(revision!==sceneRevision){disposeAsset(root);return;}
     root.name=record.id;root.userData.recordId=record.id;
     root.traverse(part=>{if(part.isMesh){part.castShadow=true;part.receiveShadow=true;}});
@@ -322,7 +406,7 @@ function applyState(state) {
     if(root.userData.light){root.userData.light.color.set(record.light?.color||'#ffffff');root.userData.light.intensity=record.light?.intensity??3;}
     else if(root.userData.camera)root.userData.camera.setFocalLength(record.focal||35);
     else if(root.userData.rig)applyRig(root,record);
-    else if(record.type!=='group'&&(record.type!=='imported'||record.asset?.materialOverride)){
+    else if(record.type!=='group'&&record.reference?.kind!=='image'&&(record.type!=='imported'||record.asset?.materialOverride)){
       if(record.type==='imported')root.traverse(part=>{for(const material of part.material?Array.isArray(part.material)?part.material:[part.material]:[])material.userData.layoutTint=true;});
       applyMaterial(root,record.material||{});
     }
@@ -391,13 +475,14 @@ function setupRenderer() {
 function resize() {
   if(!ready||!$('layout-dialog').open||busy)return;
   const width=Math.max(200,ui.viewport.clientWidth),height=Math.max(150,ui.viewport.clientHeight);
-  const framed=viewMode==='camera';
+  const framed=viewMode!=='free';
   const renderWidth=framed?Math.min(width,height*16/9):width;
   const renderHeight=framed?renderWidth*9/16:height;
   const focal=camera.getFocalLength();
   renderer.setSize(renderWidth,renderHeight);camera.aspect=width/height;shotCamera.aspect=16/9;
   camera.setFocalLength(focal);shotCamera.setFocalLength(currentScene().camera.focal);
   camera.updateProjectionMatrix();shotCamera.updateProjectionMatrix();
+  if(viewMode==='pilot'){const pilot=roots.get(pilotId)?.userData.camera;if(pilot){pilot.aspect=16/9;pilot.updateProjectionMatrix();}}
   ui.thirds.style.inset=`${(height-renderHeight)/2}px ${(width-renderWidth)/2}px`;
 }
 
@@ -443,9 +528,9 @@ function updateBounds() {
 }
 
 function attachTransform() {
-  if(transform.dragging||ikDrag)return;
+  if(transform.dragging||ikDrag||railDrag)return;
   transform.camera=activeCamera();
-  const ids=topSelection().filter(id=>roots.has(id)&&!objectById(id)?.locked);
+  const ids=topSelection().filter(id=>roots.has(id)&&!objectById(id)?.locked&&(viewMode!=='pilot'||id!==pilotId));
   transform.detach();
   if(!ids.length||playing)return;
   if(ids.length===1)transform.attach(roots.get(ids[0]));
@@ -511,10 +596,45 @@ function refreshMarkers(state) {
 function scaleMarkers() {
   const view=activeCamera();
   for(const marker of markers.values()) {
-    const radius=Math.max(.018,view.position.distanceTo(marker.position)*.012)*(marker.userData.pole?.75:1)*(marker===hovered?1.4:1);
+    const radius=Math.max(.018,view.getWorldPosition(new THREE.Vector3()).distanceTo(marker.position)*.012)*(marker.userData.pole?.75:1)*(marker===hovered?1.4:1);
     marker.scale.setScalar(radius);
     marker.material.color.set(marker===hovered?'#f1fbff':marker.userData.pole?'#bca0ff':'#8adeff');
   }
+}
+
+function railPointAt(event) {
+  if(!railOverlay.visible||playing)return -1;
+  const box=renderer.domElement.getBoundingClientRect(),points=currentScene().camera.rail.points||[];
+  let nearest=-1,distance=16;
+  points.forEach((point,index)=>{const p=new THREE.Vector3(...point).project(activeCamera());if(p.z<-1||p.z>1)return;const d=Math.hypot(box.x+(p.x+1)*box.width/2-event.clientX,box.y+(1-p.y)*box.height/2-event.clientY);if(d<distance){nearest=index;distance=d;}});
+  return nearest;
+}
+
+function scaleRailPoints() {
+  if(!railOverlay.visible)return;
+  const points=currentScene().camera.rail.points||[],viewPosition=activeCamera().getWorldPosition(new THREE.Vector3());
+  const matrix=new THREE.Matrix4(),q=new THREE.Quaternion();
+  points.forEach((point,index)=>{const p=new THREE.Vector3(...point),radius=Math.max(.025,viewPosition.distanceTo(p)*.012)*(index===railSelection?1.25:1);matrix.compose(p,q,new THREE.Vector3().setScalar(radius/.055));railOverlay.controlPoints.setMatrixAt(index,matrix);railOverlay.controlPoints.setColorAt(index,new THREE.Color(index===railSelection?'#ffffff':'#7acaff'));});
+  railOverlay.controlPoints.instanceMatrix.needsUpdate=true;if(railOverlay.controlPoints.instanceColor)railOverlay.controlPoints.instanceColor.needsUpdate=true;
+}
+
+function beginRailDrag(event,index) {
+  event.preventDefault();event.stopImmediatePropagation();stopPlayback();beginControlGesture();
+  railSelection=index;const position=new THREE.Vector3(...currentScene().camera.rail.points[index]);
+  const plane=new THREE.Plane().setFromNormalAndCoplanarPoint(activeCamera().getWorldDirection(new THREE.Vector3()),position);
+  const hit=pointerRay(event).ray.intersectPlane(plane,new THREE.Vector3());
+  railDrag={index,plane,offset:hit?hit.sub(position):new THREE.Vector3()};transform.enabled=false;transform.detach();orbit.enabled=false;
+  renderer.domElement.setPointerCapture(event.pointerId);renderer.domElement.style.cursor='grabbing';
+  ui.message(`拖动样条点 ${index+1} · Esc 取消 · 一次撤销恢复整次拖动`);
+}
+
+function moveRailDrag(event) {
+  const point=pointerRay(event).ray.intersectPlane(railDrag.plane,new THREE.Vector3());
+  if(point)setProperty('camera',`rail.points.${railDrag.index}`,point.sub(railDrag.offset).toArray());
+}
+
+function endRailDrag(cancel=false) {
+  if(!railDrag)return;railDrag=null;transform.enabled=true;renderer.domElement.style.cursor='';endControlGesture(cancel);
 }
 
 function pointerRay(event) {
@@ -574,13 +694,15 @@ function updateOrbitTarget() {
 }
 
 function enterFree() {
-  if(viewMode==='camera')putCamera(camera,cameraRecord(shotCamera));
-  viewMode='free';orbit.object=camera;updateOrbitTarget();updateViewUI();
+  if(viewMode!=='free')putCamera(camera,cameraRecord(activeCamera()));
+  pilotId=null;viewMode='free';orbit.object=camera;updateOrbitTarget();updateViewUI();
 }
 
 function stopFly() {
   if(!fly)return;
+  const before=fly.before;if(pilotId)updatePilotedCamera();
   fly=null;keys.clear();transform.enabled=true;updateOrbitTarget();saveDraft();
+  if(before){remember(before);dirty=true;refresh(true);}
   renderer.domElement.classList.remove('flying');
 }
 
@@ -591,20 +713,23 @@ function bindViewport() {
     if(busy)return;
     canvas.focus({preventScroll:true});
     if(event.button===2) {
-      event.preventDefault();event.stopImmediatePropagation();stopPlayback();enterFree();
-      transform.enabled=false;orbit.enabled=false;fly={x:event.clientX,y:event.clientY};
+      event.preventDefault();event.stopImmediatePropagation();stopPlayback();
+      const before=viewMode==='pilot'?snapshot():null;
+      if(viewMode==='pilot'){const record=cameraRecord(activeCamera());camera.aspect=16/9;putCamera(camera,record);}else enterFree();
+      transform.enabled=false;orbit.enabled=false;fly={x:event.clientX,y:event.clientY,before};
       canvas.setPointerCapture(event.pointerId);canvas.classList.add('flying');return;
     }
     const navigation=event.button===1||(event.button===0&&event.altKey);
     if(navigation){stopPlayback();enterFree();orbit.enabled=true;transform.enabled=false;event.preventDefault();}
     else {
       orbit.enabled=false;
-      if(event.button===0){const marker=markerAt(event);if(marker){stopPlayback();beginIK(event,marker);return;}}
+      if(event.button===0){const point=railPointAt(event);if(point>=0){beginRailDrag(event,point);return;}const marker=markerAt(event);if(marker){stopPlayback();beginIK(event,marker);return;}}
       transform.enabled=true;
     }
     pointer={x:event.clientX,y:event.clientY,navigation,dragged:false};
   },true);
   canvas.addEventListener('pointermove',event=>{
+    if(railDrag){moveRailDrag(event);return;}
     if(ikDrag){moveIK(event);return;}
     if(fly){
       const dx=event.clientX-fly.x,dy=event.clientY-fly.y;fly.x=event.clientX;fly.y=event.clientY;
@@ -613,26 +738,30 @@ function bindViewport() {
       camera.quaternion.setFromEuler(angles);return;
     }
     if(transform.dragging)return;
+    const railPoint=railPointAt(event);
+    if(railPoint>=0){railSelection=railPoint;canvas.style.cursor='grab';ui.message(`样条点 ${railPoint+1}：按住左键直接拖动，当前时间的轨道关键帧同步更新。`);return;}
     const next=markerAt(event);
     if(next!==hovered){hovered=next;canvas.style.cursor=next?'grab':'';scaleMarkers();if(next)ui.message(`${objectById(next.userData.objectId)?.label} · ${next.userData.label}：直接拖动调整。`);}
   });
   canvas.addEventListener('pointerup',event=>{
+    if(railDrag){endRailDrag();return;}
     if(ikDrag){endIK();return;}
     if(event.button===2){stopFly();return;}
     if(pointer&&!pointer.navigation&&!pointer.dragged&&!transform.dragging&&event.button===0&&Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y)<4&&!transform.axis)pickObject(event);
     pointer=null;transform.enabled=true;
   });
-  canvas.addEventListener('pointercancel',()=>{endIK(true);stopFly();pointer=null;});
+  canvas.addEventListener('pointercancel',()=>{endRailDrag(true);endIK(true);stopFly();pointer=null;});
   canvas.addEventListener('wheel',event=>{
     if(busy)return;event.preventDefault();
     if(fly)speed=THREE.MathUtils.clamp(speed*(event.deltaY<0?1.2:1/1.2),.2,40);
     else {enterFree();camera.position.addScaledVector(camera.getWorldDirection(new THREE.Vector3()),-Math.sign(event.deltaY)*Math.max(.15,camera.position.distanceTo(orbit.target)*.08));saveDraft();}
   },{passive:false});
-  window.addEventListener('blur',()=>{stopFly();endIK();});
+  window.addEventListener('blur',()=>{stopFly();endIK();endRailDrag();});
   $('layout-dialog').addEventListener('keydown',event=>{
     event.stopPropagation();
     if(busy){if(event.key==='Escape'){event.preventDefault();exportCancelled=true;activeExportController?.abort();}return;}
     const key=event.key.toLowerCase(),typing=/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
+    if(railDrag&&key==='escape'){event.preventDefault();endRailDrag(true);return;}
     if(typing)return;
     if(fly){if(['w','a','s','d','q','e','shift'].includes(key)){keys.add(key);event.preventDefault();}return;}
     const ctrl=event.ctrlKey||event.metaKey;
@@ -667,8 +796,11 @@ function focusSelection() {
 }
 
 function updateViewUI() {
-  ui.viewButton.textContent=viewMode==='free'?'自由视角':'拍摄机位';
+  ui.viewButton.textContent=viewMode==='free'?'自由视角':viewMode==='pilot'?'驾驶相机':'拍摄机位';
   ui.viewButton.classList.toggle('active',viewMode==='camera');
+  $('layout-exit-camera').disabled=viewMode==='free';
+  $('layout-pilot-camera').classList.toggle('active',viewMode==='pilot');
+  for(const [id,root] of roots)root.traverse(part=>{if(part.userData.editorOnly)part.visible=viewMode!=='pilot'||id!==pilotId;});
   transform.camera=activeCamera();
   setTransform(transform.mode);
   resize();
@@ -702,12 +834,13 @@ function animate(now) {
     const local=new THREE.Vector3(Number(keys.has('d'))-Number(keys.has('a')),0,Number(keys.has('s'))-Number(keys.has('w')));
     if(local.lengthSq())camera.position.addScaledVector(local.normalize().applyQuaternion(camera.quaternion),speed*delta*(keys.has('shift')?3:1));
     camera.position.y+=(Number(keys.has('e'))-Number(keys.has('q')))*speed*delta*(keys.has('shift')?3:1);
+    if(pilotId)updatePilotedCamera();
   }
   if(!busy){
     if(playing){time=Math.min(data.sequence.duration,playOffset+(now-playStart)/1000);applyState(currentScene());timeline.setTime(time);if(time>=data.sequence.duration){stopPlayback();saveDraft();}}
-    else if(dirty&&!ikDrag&&!transform.dragging&&!syncing)refresh();
-    scaleMarkers();renderer.render(world,activeCamera());
-    const view=activeCamera();ui.hud.textContent=`${viewMode==='free'?'自由视口':'拍摄机位'} · ${Math.round(view.getFocalLength())} mm · ${view.position.y.toFixed(2)} m · 飞行 ${speed.toFixed(1)}`;
+    else if(dirty&&!ikDrag&&!railDrag&&!controlGesture&&!transform.dragging&&!syncing)refresh();
+    scaleMarkers();scaleRailPoints();renderer.render(world,activeCamera());
+    const view=activeCamera();ui.hud.textContent=`${viewMode==='free'?'自由视口':viewMode==='pilot'?'驾驶 · '+objectById(pilotId)?.label:'拍摄机位'} · ${Math.round(view.getFocalLength())} mm · ${view.getWorldPosition(new THREE.Vector3()).y.toFixed(2)} m · 飞行 ${speed.toFixed(1)}`;
   }
   animationFrame=requestAnimationFrame(animate);
 }
@@ -823,8 +956,10 @@ function createAPI() {
     fullscreen:async()=>{if(document.fullscreenElement)await document.exitFullscreen();else await $('layout-dialog').requestFullscreen();resize();},
     select,group:groupSelected,duplicate,remove:removeSelected,reparent:reparentSelected,
     rename:(id,label)=>setProperty(id,'label',label),property:setProperty,key:keyProperty,
+    beginGesture:beginControlGesture,endGesture:endControlGesture,
     addAsset,thumbnail,transform:setTransform,focus:focusSelection,
-    toggleView:()=>{viewMode=viewMode==='free'?'camera':'free';updateViewUI();},
+    toggleView:()=>{if(viewMode==='free'){pilotId=null;viewMode='camera';updateViewUI();}else enterFree();},
+    newCamera,pilotCamera,useCamera,exitCamera:enterFree,createRail,focusRail,characters:getCharacters,addCharacter,
     captureCamera:()=>captureCamera(),
     viewport:(key,value)=>mutate(()=>{data.viewport[key]=value;}),
     environment:(key,value)=>mutate(()=>{data.environment[key]=value;syncTrackedProperty('environment',key);}),
@@ -835,8 +970,8 @@ function createAPI() {
     joint:value=>{if(value)selectedJoint=value;return selectedJoint;},
     cameraAngles:record=>new THREE.Euler().setFromQuaternion(new THREE.Quaternion(...record.quaternion),'YXZ').toArray().slice(0,3).map(deg),
     cameraAngle:(axis,value)=>{const record=currentScene().camera,angle=new THREE.Euler().setFromQuaternion(new THREE.Quaternion(...record.quaternion),'YXZ');angle[['x','y','z'][axis]]=rad(value);setProperty('camera','quaternion',new THREE.Quaternion().setFromEuler(angle).toArray());},
-    railPoint:()=>mutate(()=>{data.camera.rail.points.push(activeCamera().position.toArray());if(data.camera.rail.points.length>32)throw new Error('轨道最多 32 个点。');}),
-    removeRailPoint:index=>mutate(()=>{if(data.camera.rail.points.length<=2)throw new Error('轨道至少保留两个点。');data.camera.rail.points.splice(index,1);}),
+    railPoint:()=>mutate(()=>{data.camera.rail.points=copy(currentScene().camera.rail.points);data.camera.rail.points.push(activeCamera().getWorldPosition(new THREE.Vector3()).toArray());if(data.camera.rail.points.length>32)throw new Error('轨道最多 32 个点。');syncTrackedProperty('camera','rail.points');}),
+    removeRailPoint:index=>mutate(()=>{data.camera.rail.points=copy(currentScene().camera.rail.points);if(data.camera.rail.points.length<=2)throw new Error('轨道至少保留两个点。');data.camera.rail.points.splice(index,1);syncTrackedProperty('camera','rail.points');}),
     exportRange:value=>{if(value){if(value.start!=null)exportStart=value.start;if(value.duration!=null)exportDuration=value.duration;}return{start:exportStart,duration:exportDuration};},
     exportImage,exportVideo,cancelExport:()=>{exportCancelled=true;activeExportController?.abort();}
   };
@@ -845,17 +980,16 @@ function createAPI() {
 function timelineAPI() {
   return {
     play:togglePlayback,seek,keyAll:()=>captureCamera(true),
+    undo,stop:stopPlayback,message:text=>ui.message(text),
+    editKeys:edits=>mutate(()=>applyKeyEdits(data,edits)),
+    pasteKeys:entries=>mutate(()=>pasteKeys(data,entries)),
     duration:value=>mutate(()=>{
       const last=Math.max(0,...data.sequence.tracks.flatMap(track=>track.keys.map(key=>key.time)));
       if(last>value)throw new Error(`末尾关键帧位于 ${last.toFixed(2)} 秒，请先移走或删除，再缩短时间线。`);
       data.sequence.duration=value;time=Math.min(time,value);exportDuration=Math.min(exportDuration,value);
     }),
     fps:value=>mutate(()=>{data.sequence.fps=value;}),
-    moveKeys:items=>mutate(()=>{
-      const first=items[0],old=first&&data.sequence.tracks.find(track=>track.id===first.trackId)?.keys.find(key=>key.id===first.keyId)?.time;
-      const ordered=[...items].sort((a,b)=>(first.time>old?-1:1)*(a.time-b.time));
-      for(const item of ordered)moveKey(data,item.trackId,item.keyId,item.time);
-    }),
+    moveKeys:items=>mutate(()=>applyKeyEdits(data,items)),
     removeKeys:items=>mutate(()=>{for(const item of items)removeKey(data,item.trackId,item.keyId);}),
     interpolation:(items,value)=>mutate(()=>{for(const item of items){const key=data.sequence.tracks.find(track=>track.id===item.trackId)?.keys.find(key=>key.id===item.keyId);if(key)key.interpolation=value;}})
   };
@@ -876,7 +1010,7 @@ async function exportGLB(options={}) {
 }
 
 async function installScene(value,clearHistory=true) {
-  stopPlayback();endIK();stopFly();
+  stopPlayback();endIK();endRailDrag();endControlGesture();stopFly();pilotId=null;
   data=normalizeScene(value);sceneRevision++;
   time=THREE.MathUtils.clamp(Number(data.viewport.playhead)||0,0,data.sequence.duration);
   putCamera(camera,data.viewport.editorCamera||data.camera);putCamera(shotCamera,evaluateScene(data,time).camera);updateOrbitTarget();
@@ -922,6 +1056,7 @@ function init() {
   $('layout-dialog').addEventListener('close',()=>{
     if(!ready)return;
     endIK();stopFly();stopPlayback();exportCancelled=true;activeExportController?.abort();
+    endRailDrag();endControlGesture();
     if(!busy)saveDraft(true);
     cancelAnimationFrame(animationFrame);animationFrame=0;
     if(document.fullscreenElement)document.exitFullscreen();
@@ -930,9 +1065,10 @@ function init() {
     open,getScene:()=>ready?snapshot():null,
     getEvaluatedScene:()=>ready?copy(currentScene()):null,
     loadScene:async value=>{if(!ready)initialize();await installScene(value);},
-    importAsset,
+    importAsset,addCharacter,
     getSelection:()=>[...selection]
   };
+  window.addEventListener('lumen:characters-changed',()=>{if(ready)ui.renderCharacters();});
 }
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

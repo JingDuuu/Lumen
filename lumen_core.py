@@ -168,6 +168,11 @@ def build_workflow(prompt, width, height, duration, steps, seed,
                     "image": [image_id, 0], "frame_idx": entry["frame_index"]}}
                 positive = [guide_id, 0]
             wf["7"]["inputs"]["conditioning"] = positive
+    if compiled and compiled.get("audio_mode") == "silent":
+        wf["13"]["inputs"].pop("audio")
+        wf.pop("12")
+        if compiled["model_mode"] != "ref2va":
+            wf.pop("4")
     return wf
 
 
@@ -327,12 +332,13 @@ def new_record_id():
     return uuid.uuid4().hex[:10]
 
 
-def create_record(prompt_id, params, fields, prompt, images, items=None, workflow=None, connections=None, zones=None, compiled=None):
+def create_record(prompt_id, params, fields, prompt, images, items=None, workflow=None, connections=None, zones=None, compiled=None, source=None, title=None):
     rec = {
         "id": new_record_id(),
         "prompt_id": prompt_id,
         "created": time.strftime("%Y-%m-%d %H:%M:%S"),
         "duration": params.get("duration"),
+        "audio_mode": params.get("audio_mode", "generated"),
         "resolution": params.get("resolution"),
         "steps": params.get("steps"),
         "seed": params.get("seed"),
@@ -357,6 +363,10 @@ def create_record(prompt_id, params, fields, prompt, images, items=None, workflo
         "tags": [],
         "thumb": None,
     }
+    if source:
+        rec["source"] = copy.deepcopy(source)
+    if title:
+        rec["title"] = title
     if compiled:
         rec.update(model=MODEL_REF if compiled["model_mode"] == "ref2va" else MODEL_UNET,
                    model_mode=compiled["model_mode"], input_manifest=copy.deepcopy(compiled["input_manifest"]),
@@ -444,6 +454,7 @@ def refill_payload(rec_id):
         "steps": r.get("steps") or 20,
         "seed": r.get("seed", 20260827),
         "model_mode": r.get("requested_model_mode", r.get("model_mode", "auto")),
+        "audio_mode": r.get("audio_mode", "generated"),
     }
     items = copy.deepcopy(r.get("items") if r.get("items") is not None else items)
     return {"items": items, "connections": normalize_connections(items, r.get("connections")),

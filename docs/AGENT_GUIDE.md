@@ -4,6 +4,32 @@ Lumen accepts local HTTP requests and structured CLI commands. An external model
 
 All examples use synthetic content. Start Lumen normally, then run commands from the Lumen folder. The CLI reads the portable runtime configuration; it does not assume a particular Windows username or installation drive.
 
+## Chat entry point
+
+Read `GET /api/agent/bootstrap` for this installation's ready-to-copy Chinese prompt and MCP
+stdio configuration. With terminal tools, use `lumen.bat doctor --json`, then
+`ensure --timeout 180 --json`. `chat --prompt "..." --request-id UUID --wait --json` is the
+recommended one-command local workflow. See [quick start](AGENT_QUICKSTART.md).
+
+`POST /api/agent/generate` requires a stable `request_id` and one of: `board`,
+`use_current_board:true` with `expected_revision`, or `prompt` with optional `preset_ids` and
+`params`. Optional `client_name` and `title` label the job in the human board. A plain prompt
+creates an independent shot and leaves the current board intact. Defaults are 608×352, 5 seconds
+on the model's frame grid, and 8 steps for a quick preview. Raise steps explicitly for refinement.
+Preset member masks are preserved and preset generation parameters do not replace shot params.
+
+The record and request identity are persisted before the engine receives the job. An identical
+request replays its existing record; reusing an ID for another payload returns HTTP 409.
+An uncertain response is a reason to inspect/retry the same ID, never to submit a new random ID.
+
+Poll `GET /api/agent/jobs/RECORD_ID`, then fetch `/api/agent/jobs/RECORD_ID/result`.
+Only `ready:true` confirms that a completed job has its real nonempty output files.
+`files` provides absolute `local_path`, loopback playback `url`, attachment `download_url`,
+MIME type and size. The `/files/INDEX` route serves the original verified file as an attachment.
+A missing/moved output yields `ready:false` and `OUTPUT_MISSING` even if the historic task says done.
+Show or attach the local file with the chat host's actual capabilities. No video is uploaded to
+an external service; pure cloud chats need a local connection and cannot access these files by prompt alone.
+
 ## Discover first
 
 ```powershell
@@ -51,7 +77,7 @@ Failures are `{"ok":false,"code":"...","error":"...","http_status":409,"detail":
 .\lumen.bat generate --input examples/agent/board.json --wait --timeout 600 --json
 ```
 
-`preview` calls `/api/agent/preview`, validates the complete draft, and returns `board` plus `estimate`. Inspect `compiled_prompt`, `input_manifest`, `connection_manifest`, `model_mode`, `model_available`, `warnings`, actual frame count/duration and budget confirmation. It can probe/cache local media, but never writes the board or submits generation. `POST /api/estimate` remains available for a raw board snapshot. `generate --input` treats that JSON as the full generation configuration and always estimates it before submission. Use this only when the user has asked to generate. If the estimate requires expensive-job confirmation, the caller must explicitly add `--confirm-expensive`; a flag hidden inside the input file does not authorize it.
+`preview` calls `/api/agent/preview`, validates the complete draft, and returns `board` plus `estimate`. Inspect `compiled_prompt`, `input_manifest`, `connection_manifest`, `model_mode`, `model_available`, `warnings`, actual frame count/duration and non-blocking workload information. It can probe/cache local media, but never writes the board or submits generation. `POST /api/estimate` remains available for a raw board snapshot. `generate --input` treats that JSON as the full generation configuration and always estimates it before submission. Use this only when the user has asked to generate. Valid jobs no longer need an expensive-job checkbox or a CLI confirmation flag; `requires_confirmation` is false. The legacy CLI flag remains accepted for older servers.
 
 Media cards use the server-owned `name` returned by `/api/upload` as `file`. Do not send a filesystem path or external URL. Use `enabled:false` to retain a card while excluding it from model inputs. Ref2VA supports actual image/video/audio references; FL2VA supports first/last/middle frame guides. A mixed incompatible configuration is rejected rather than silently dropping inputs. Video sampling is bounded by the model: the manifest, rather than the original upload duration, is authoritative.
 
@@ -133,3 +159,42 @@ python tests/agent_cli_e2e.py
 ```
 
 The end-to-end script launches a temporary random-port fixture, calls the real CLI and HTTP routes, exercises upload/preset package/import/board preview+injection/conflict/prefab persistence, and captures actual subprocess exit codes. It never starts the real desktop or submits a model task. The evidence is `diagnostics/agent-cli-acceptance.json`.
+
+
+### Director boards and sound
+
+The visible workspace is an asset board. `asset_id`/`asset_name` identify a saved asset;
+`character_id`/`character_name` identify one character across reference views and Previs
+objects. Multiple characters in the same area are **not** the same identity. Explicit
+identity IDs (or a legacy `preset_id`) group views. Keep IDs stable when adding references.
+`enabled:false` excludes one member reference from conditioning. `asset_enabled:false` excludes the whole asset without changing its member selection; a member participates only when both flags are true. Neither flag removes the source file.
+
+For sound use a text item with `role:"audio"`, `audio_type:"dialogue"|"sfx"|"music"|"ambience"`.
+Dialogue can set `speaker_id` to the participating character ID. The compiler preserves the
+original dialogue and punctuation. `params.audio_mode:"silent"` removes the final audio
+track and audio decoding; the model still performs its joint audio/video sampling internally.
+`"generated"` is the default. Video reference sound is included only when `include_audio:true`.
+
+Preview returns `compiled_prompt`, `prompt_sections`, and an `input_packet` containing actual
+media sockets and identities. Text-card labels, area lists, and editor arrows are not sent
+in the prompt. `<Picture N>`, `<Video N>`, `<Audio N>` retain the real H3 socket numbering;
+`<Subject N>` binds an independent character to its views. The compiler deduplicates exact
+notes and organizes the user's wording locally; it does not caption media, invent missing
+shot descriptions, or perform the optional full English Context-IR language-model rewrite.
+
+Prompt references: [MiniMax reference guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md),
+[ComfyUI native guide](https://docs.comfy.org/tutorials/video/minimax/minimax-h3-native).
+
+
+### Weighted animation curves (scene version 3)
+
+Legacy track/key `interpolation` stays `linear|smooth|step`. Numeric keyframes can additionally
+store `curves` by relative component path: `""` for a scalar, `"0"/"1"/"2"` for XYZ, or a nested
+path such as `"leftShoulder.0"` for a pose object. Each value is
+`{"mode":"auto|user|break|linear|constant","in":{"dt":0.25,"dv":0.5},"out":{"dt":0.25,"dv":0.5}}`.
+`dt` is nonnegative seconds, `dv` is the component's units. Incoming handle is `(time-dt,value-dv)`;
+outgoing is `(time+dt,value+dv)`. `user` links slopes, `break` permits independent sides,
+`auto` derives monotone slopes. Weighted curves solve Bézier time, and playback/export share
+that evaluator. Explicit rotation curves follow authored angle values; legacy rotations keep
+shortest-arc interpolation. Quaternion uses slerp, and parent/visibility/hand preset/HDR/clip
+tracks hold discrete values; do not add numeric curves to those properties.

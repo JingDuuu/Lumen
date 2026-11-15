@@ -3,6 +3,7 @@ import argparse
 from contextlib import redirect_stdout
 import json
 import mimetypes
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -95,24 +96,88 @@ def require_desktop():
     return state
 
 
-def cmd_start(_):
+def launch_desktop():
+    if not PYTHONW.is_file() or not DESKTOP.is_file():
+        raise ApiError("Lumen 桌面入口或 Python 环境缺失，请检查安装路径。", "LOCAL_ERROR")
     subprocess.Popen([str(PYTHONW), str(DESKTOP)], cwd=str(ROOT),
                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     creationflags=subprocess.CREATE_NO_WINDOW)
-    print("正在打开 Lumen 桌面窗口…")
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def startup_timeout(timeout):
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or not 0 < timeout <= 900:
+        raise ApiError("启动等待范围为 0–900 秒", "INVALID_INPUT")
+    return timeout
+
+
+def ensure_service(timeout=180, launch=True):
+    """Use the existing desktop lifecycle; never start an independent API process."""
+    timeout = startup_timeout(timeout)
+    deadline = time.monotonic() + timeout
+    launched, engine_start_requested, state = False, False, None
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ApiError("Lumen 尚未就绪；未提交生成任务。请查看桌面状态和日志。", "RUNTIME_NOT_READY",
+                           detail={"system": state, "desktop_log": str(CONFIG.log_dir / "desktop.log"), "submitted": False})
         try:
-            state = request_json("/api/system", timeout=2)
-            if state.get("desktop"):
-                ready = state.get("comfyui_running") and state.get("progress_connected")
-                print("桌面应用已打开；引擎" + ("已就绪。" if ready else "正在准备，请稍后查看 lumen status。"))
-                output(state, "") if JSON_MODE else None
-                return 0
-        except ApiError:
-            pass
-        time.sleep(1)
-    raise ApiError("桌面应用尚未响应，请查看 " + str(CONFIG.log_dir / "desktop.log"))
+            state = request_json("/api/system", timeout=min(3, remaining))
+        except ConnectionUnavailable:
+            if not launched and launch:
+                endpoint = urllib.parse.urlsplit(API_URL)
+                if (endpoint.port or 80) != 8088:
+                    raise ApiError("指定服务未运行；自动启动只支持本机默认 8088 端口。", "CONNECTION_UNAVAILABLE")
+                launch_desktop()
+                launched = True
+        else:
+            if not state.get("desktop"):
+                raise ApiError("该端口正在运行独立网页服务，不能接管。请使用正常 Lumen 桌面入口。", "SERVICE_MISMATCH")
+            models = state.get("models")
+            if isinstance(models, dict) and models and not any(model.get("available") for model in models.values() if isinstance(model, dict)):
+                raise ApiError("H3 模型尚未安装完成；请在 Lumen 的模型与安装面板检查。未自动下载模型。", "MODEL_MISSING", detail=state)
+            engine = state.get("engine") or {}
+            error = engine.get("error")
+            if error:
+                raise ApiError("Lumen 引擎启动失败：" + str(error), "RUNTIME_NOT_READY", detail=state)
+            if state.get("comfyui_running") and state.get("progress_connected"):
+                return state
+            if not state.get("comfyui_running") and not engine.get("owned") and not engine_start_requested:
+                engine_start_requested = True
+                request_json("/api/comfyui/start", "POST", {}, timeout=min(10, remaining))
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+
+def cmd_start(args):
+    timeout = startup_timeout(getattr(args, "timeout", 180))
+    launch_desktop()
+    print("正在打开 Lumen 桌面窗口…")
+    state = ensure_service(timeout=timeout, launch=False)
+    output(state, "桌面和 H3 引擎已就绪，任务进度已连接。")
+    return 0
+
+
+def cmd_ensure(args):
+    output(ensure_service(timeout=args.timeout), "Lumen 和 H3 已就绪。")
+
+
+def cmd_doctor(_):
+    manifest = json.loads((ROOT / "models-manifest.json").read_text(encoding="utf-8"))
+    models = []
+    for model in manifest["models"]:
+        path = CONFIG.models_dir / model["path"]
+        size = path.stat().st_size if path.is_file() else 0
+        models.append(dict(id=model["id"], path=str(path), present=path.is_file(), size_bytes=size,
+                           expected_bytes=model["size"], size_matches=size == model["size"]))
+    local = dict(python_present=CONFIG.engine_python.is_file(), desktop_present=DESKTOP.is_file(),
+                 engine_present=(CONFIG.comfy_dir / "main.py").is_file(), models_size_verified=all(m["size_matches"] for m in models))
+    try:
+        system = request_json("/api/system", timeout=3)
+        service = dict(reachable=True, system=system)
+    except ConnectionUnavailable:
+        service = dict(reachable=False, message="Lumen 当前未运行；ensure 会通过原桌面入口启动。")
+    output(dict(installation_ready=all(local.values()), local=local, paths=CONFIG.as_dict(),
+                models=models, verification="file-size; full hashes not reread", service=service,
+                output_directory=str(CONFIG.output_dir)), "" if JSON_MODE else None)
 
 
 def cmd_stop(_):
@@ -216,7 +281,9 @@ def wait_for_task(prompt_id, record_id, timeout=0):
 
 
 def cmd_generate(args):
-    require_desktop()
+    state = require_desktop()
+    if state.get("comfyui_running") is False or state.get("progress_connected") is False:
+        ensure_service(timeout=180, launch=False)
     if args.input:
         payload = load_input(args.input)
         if not isinstance(payload, dict):
@@ -251,11 +318,98 @@ def submit_payload(args, payload):
         if not args.confirm_expensive:
             raise ApiError("此配置需要确认高负载；确认后加 --confirm-expensive，或先使用默认试片参数。", "CONFIRMATION_REQUIRED", detail=budget)
         payload["confirm_expensive"] = True
-    response = request_json("/api/generate", "POST", payload, timeout=35)
+    response = request_json("/api/generate", "POST", payload, timeout=args.http_timeout)
     print("任务已提交：%s；prompt_id：%s" % (response["record_id"], response["prompt_id"]))
     output({**response, "estimate": budget}, "") if JSON_MODE else None
     if args.wait:
         return wait_for_task(response["prompt_id"], response["record_id"], args.timeout)
+    return 0
+
+
+def task_timeout(timeout):
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
+        raise ApiError("任务等待秒数必须为有限非负数；0 表示持续等待", "INVALID_INPUT")
+    return timeout
+
+
+def wait_for_job(record_id, timeout=600):
+    timeout = task_timeout(timeout)
+    path = "/api/agent/jobs/" + urllib.parse.quote(record_id, safe="")
+    deadline = time.monotonic() + timeout if timeout else None
+    previous = None
+    try:
+        while True:
+            response = request_json(path)
+            task = response.get("task", response)
+            if task.get("status") in TERMINAL:
+                result = request_json(path + "/result")
+                output(result, "" if JSON_MODE else None)
+                return 0 if task["status"] == "done" and result.get("ready") and result.get("files") else 1
+            progress = task.get("progress") or {}
+            summary = (task.get("status"), task.get("stage_label"), progress.get("step"), progress.get("total"))
+            if summary != previous:
+                print((task.get("stage_label") or task.get("status") or "等待状态") +
+                      (f" {progress.get('step', 0)}/{progress['total']} 步" if progress.get("total") else ""))
+                previous = summary
+            if deadline is not None and time.monotonic() >= deadline:
+                output(dict(record_id=record_id, task=task, code="WAIT_TIMEOUT", cancelled=False,
+                            result_url=path + "/result"), "等待超时，任务继续运行；请用同一 record_id 查询，不要重复生成。")
+                return 2
+            time.sleep(2 if deadline is None else min(2, max(0, deadline - time.monotonic())))
+    except KeyboardInterrupt:
+        output(dict(record_id=record_id, code="INTERRUPTED", cancelled=False, result_url=path + "/result"),
+               "已退出等待，任务继续运行。")
+        return 130
+
+
+def cmd_job(args):
+    path = "/api/agent/jobs/" + urllib.parse.quote(args.id, safe="")
+    if args.action == "wait":
+        return wait_for_job(args.id, args.timeout)
+    result = request_json(path + "/result")
+    output(result)
+    return 1 if result.get("status") in TERMINAL and not result.get("ready") else 0
+
+
+def cmd_chat(args):
+    if args.wait:
+        task_timeout(args.timeout)
+    payload = load_input(args.input) if args.input else {}
+    if not isinstance(payload, dict):
+        raise ApiError("chat 的 --input 须为 JSON 对象", "INVALID_INPUT")
+    if args.prompt is not None:
+        payload["prompt"] = args.prompt
+    if args.preset_id:
+        payload["preset_ids"] = args.preset_id
+    if args.current_board:
+        payload["use_current_board"] = True
+        payload["expected_revision"] = args.expected_revision
+    params = {key: getattr(args, key) for key in ("resolution", "duration", "steps", "seed", "audio_mode") if getattr(args, key) is not None}
+    if params:
+        if not isinstance(payload.get("params", {}), dict):
+            raise ApiError("params 须为 JSON 对象", "INVALID_INPUT")
+        payload["params"] = {**payload.get("params", {}), **params}
+    request_id = args.request_id or payload.get("request_id") or "chat-" + uuid.uuid4().hex
+    payload["request_id"] = request_id
+    if args.title:
+        payload["title"] = args.title
+    payload.setdefault("client_name", args.client_name)
+    sources = sum(bool(payload.get(key)) for key in ("board", "use_current_board", "prompt"))
+    if sources != 1:
+        raise ApiError("chat 需且只能提供 --prompt、--current-board 或 --input 中的 board 之一", "INVALID_INPUT")
+    if payload.get("use_current_board") and not payload.get("expected_revision"):
+        raise ApiError("使用当前看板需提供 --expected-revision；先运行 board get 读取版本", "INVALID_INPUT")
+    ensure_service(timeout=args.start_timeout)
+    print("生成请求标识：" + str(request_id))
+    try:
+        response = request_json("/api/agent/generate", "POST", payload, timeout=args.http_timeout)
+    except ConnectionUnavailable as exc:
+        raise ApiError("生成请求的结果未知。保留该 request_id，恢复连接后用同一请求核对；不要创建新请求重复生成。",
+                       "OUTCOME_UNKNOWN", detail={"request_id": request_id, "cancelled": False}) from exc
+    response = {**response, "request_id": request_id}
+    output(response, "任务已提交：" + response["record_id"])
+    if args.wait:
+        return wait_for_job(response["record_id"], args.timeout)
     return 0
 
 
@@ -365,7 +519,11 @@ def parser():
     ap = CliParser(prog="lumen", description="Lumen local agent CLI（统一任务 API）", parents=[common])
     ap.set_defaults(json=False, input=None, url=API_URL, http_timeout=120)
     sub = ap.add_subparsers(dest="command", required=True)
-    sub.add_parser("start", parents=[common], help="打开桌面应用及其引擎")
+    start = sub.add_parser("start", parents=[common], help="打开原桌面应用并等待引擎就绪")
+    start.add_argument("--timeout", type=float, default=180, help="启动等待秒数，最多900")
+    ensure = sub.add_parser("ensure", parents=[common], help="复用或启动桌面应用，等待引擎和进度连接")
+    ensure.add_argument("--timeout", type=float, default=180, help="启动等待秒数，最多900")
+    sub.add_parser("doctor", parents=[common], help="只读检查本机路径、权重尺寸及连接")
     sub.add_parser("stop", parents=[common], help="关闭桌面应用及其拥有的引擎")
     sub.add_parser("status", parents=[common], help="查看桌面和任务状态")
     g = sub.add_parser("generate", parents=[common], help="通过桌面应用提交任务；--input 支持完整画板")
@@ -380,6 +538,26 @@ def parser():
     g.add_argument("--confirm-expensive", action="store_true", help="确认预检提示的高负载配置")
     g.add_argument("--wait", action="store_true", help="等待应用确认完成、失败或取消")
     g.add_argument("--timeout", type=float, default=0, help="最多等待秒数；0为不限，超时不取消任务")
+    chat = sub.add_parser("chat", parents=[common], help="Agent 一次调用：启动桌面、按请求ID提交、可等待本地结果")
+    chat.add_argument("--prompt")
+    chat.add_argument("--preset-id", action="append", default=[], help="从角色/场景库选择的准确预设 ID，可重复")
+    chat.add_argument("--current-board", action="store_true", help="生成已检查过版本的当前看板")
+    chat.add_argument("--expected-revision", help="当前看板的版本，来自 board get")
+    chat.add_argument("--request-id", help="一次生成的稳定标识；未知响应后重试必须复用")
+    chat.add_argument("--client-name", default="Lumen CLI", help="发起调用的 Agent 名称")
+    chat.add_argument("--title", help="素材库中本次镜头名称")
+    chat.add_argument("--resolution")
+    chat.add_argument("--duration", type=float)
+    chat.add_argument("--steps", type=int)
+    chat.add_argument("--seed", type=int)
+    chat.add_argument("--audio-mode", choices=["generated", "silent"])
+    chat.add_argument("--wait", action="store_true", help="等待实际输出文件可用后返回")
+    chat.add_argument("--timeout", type=float, default=600, help="任务等待秒数，0为持续等待；超时不取消")
+    chat.add_argument("--start-timeout", type=float, default=180, help="桌面/引擎启动等待秒数，最多900")
+    job = sub.add_parser("job", parents=[common], help="按 record_id 查询结果或继续等待，绝不重新生成")
+    job.add_argument("action", choices=["result", "wait"])
+    job.add_argument("id", help="record_id")
+    job.add_argument("--timeout", type=float, default=600, help="等待秒数，0为持续等待；超时不取消")
     ls = sub.add_parser("list", parents=[common], help="列出素材库")
     ls.add_argument("--q")
     ls.add_argument("--tag")
@@ -419,7 +597,8 @@ def main(argv=None):
         sys.stdin.reconfigure(encoding="utf-8-sig", errors="strict")
     argv = sys.argv[1:] if argv is None else argv
     JSON_MODE, RESULT = "--json" in argv, None
-    handlers = dict(start=cmd_start, stop=cmd_stop, status=cmd_status, generate=cmd_generate,
+    handlers = dict(start=cmd_start, ensure=cmd_ensure, doctor=cmd_doctor, chat=cmd_chat, job=cmd_job,
+                    stop=cmd_stop, status=cmd_status, generate=cmd_generate,
                     list=cmd_list, info=cmd_info, refill=cmd_refill, open=cmd_open,
                     cancel=cmd_cancel, presets=cmd_presets, api=cmd_api, upload=cmd_upload,
                     discover=cmd_discover, schema=cmd_discover, catalog=cmd_discover, preview=cmd_preview, board=cmd_board)

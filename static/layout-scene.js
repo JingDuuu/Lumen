@@ -1,6 +1,7 @@
 /* Serializable Previs scene operations. No renderer, DOM, network or persistence. */
 import * as THREE from './vendor/three/three.module.js';
 import { ASSETS } from './layout-assets.js';
+import { normalizeCurves, applyNumericCurves, discreteProperty } from './layout-curves.js';
 
 export const MAX_OBJECTS = 200;
 export const MAX_KEYS = 10000;
@@ -99,6 +100,7 @@ export function normalizeScene(raw) {
     for (const key of [...(track.keys || [])].sort((a,b)=>a.time-b.time)) {
       if (key.value === undefined) continue;
       const normal={id:String(key.id || uid()),time:finite(key.time,0,0,duration),value:copy(key.value)};
+      if(key.curves !== undefined)normal.curves=normalizeCurves(key.curves,track.property,normal.value);
       if (key.interpolation) normal.interpolation=['linear','smooth','step'].includes(key.interpolation)?key.interpolation:'linear';
       const match=keys.find(k=>Math.abs(k.time-normal.time)<1e-5);
       if (match) Object.assign(match,normal); else keys.push(normal);
@@ -144,10 +146,11 @@ export function sampleTrack(track,time) {
   if(time<=keys[0].time)return copy(keys[0].value);
   if(time>=keys.at(-1).time)return copy(keys.at(-1).value);
   const index=keys.findIndex(k=>k.time>time), a=keys[index-1],b=keys[index];
-  const mode=a.interpolation || track.interpolation, discrete=['parentId','visible','hands','hdri'].includes(track.property)||track.property.endsWith('.enabled');
-  if(mode==='step'||discrete)return copy(a.value);
+  const mode=a.interpolation || track.interpolation, discrete=discreteProperty(track.property);
+  if(discrete)return copy(a.value);
+  if(mode==='step')return applyNumericCurves(track,time,copy(a.value));
   const t=(time-a.time)/(b.time-a.time), s=mode==='smooth'?t*t*(3-2*t):t;
-  return blend(a.value,b.value,s,track.property);
+  return applyNumericCurves(track,time,blend(a.value,b.value,s,track.property));
 }
 export function evaluateScene(scene,time) {
   const result=copy(scene), at=finite(time,0,0,scene.sequence.duration);
@@ -188,6 +191,34 @@ export function moveKey(scene,trackId,keyId,time) {
   const track=scene.sequence.tracks.find(t=>t.id===trackId),key=track?.keys.find(k=>k.id===keyId);
   if(!key)throw new Error('关键帧不存在');const at=finite(time,0,0,scene.sequence.duration);
   if(track.keys.some(k=>k!==key&&Math.abs(k.time-at)<1e-5))throw new Error('此时刻已有关键帧');key.time=at;track.keys.sort((a,b)=>a.time-b.time);return key;
+}
+export function applyKeyEdits(scene,edits) {
+  const next={...scene,sequence:copy(scene.sequence)};
+  for(const edit of edits){
+    const track=next.sequence.tracks.find(t=>t.id===edit.trackId), key=track?.keys.find(k=>k.id===edit.keyId);
+    if(!key)throw new Error('关键帧不存在');
+    if(edit.time!==undefined){if(!Number.isFinite(edit.time)||edit.time<0||edit.time>scene.sequence.duration)throw new Error('关键帧时间超出范围');key.time=edit.time;}
+    if(edit.value!==undefined)key.value=copy(edit.value);
+    if(edit.curves!==undefined)key.curves=normalizeCurves(edit.curves,track.property,key.value);
+    if(edit.interpolation!==undefined)key.interpolation=edit.interpolation;
+  }
+  for(const track of next.sequence.tracks){
+    track.keys.sort((a,b)=>a.time-b.time);
+    if(track.keys.some((key,i)=>i&&Math.abs(key.time-track.keys[i-1].time)<1e-5))throw new Error('同一轨道此时刻已有关键帧；操作未应用');
+  }
+  scene.sequence=normalizeScene(next).sequence;
+}
+export function pasteKeys(scene,entries) {
+  const next={...scene,sequence:copy(scene.sequence)};
+  for(const entry of entries){
+    let track=next.sequence.tracks.find(t=>t.id===entry.trackId);
+    if(!track)track=next.sequence.tracks.find(t=>t.targetId===entry.targetId&&t.property===entry.property);
+    if(!track){track={id:uid(),targetId:entry.targetId,property:entry.property,interpolation:entry.interpolation||'linear',keys:[]};next.sequence.tracks.push(track);}
+    if(!Number.isFinite(entry.key.time)||entry.key.time<0||entry.key.time>scene.sequence.duration)throw new Error('粘贴会超出片段时长');
+    if(track.keys.some(k=>Math.abs(k.time-entry.key.time)<1e-5))throw new Error('粘贴位置已有关键帧；请移动播放头');
+    track.keys.push({...copy(entry.key),id:uid()});
+  }
+  scene.sequence=normalizeScene(next).sequence;
 }
 export function keyAll(scene,time,objectIds=null) {
   const next={...scene,sequence:copy(scene.sequence)};

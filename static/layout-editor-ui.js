@@ -1,4 +1,5 @@
 /* Native-sized editor controls. Scene ownership stays in layout.js. */
+import { numericControl } from './layout-controls.js';
 export const node = (tag, className = '', text) => {
   const element = document.createElement(tag);
   element.className = className;
@@ -25,6 +26,9 @@ export function icon(name) {
     reset: 'M5 8a8 8 0 1 1-1 7M5 3v5h5',
     expand: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5',
     close: 'm6 6 12 12M6 18 18 6',
+    camera: 'M3 7h12v12H3V7Zm12 4 6-4v12l-6-4M7 7V4h5v3',
+    rail: 'M3 18C4 3 9 3 12 12s7 8 9-6M3 18h.01M12 12h.01M21 6h.01',
+    exit: 'M9 4H3v16h6m4-4 5-4-5-4m-5 4h12',
   };
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -112,7 +116,8 @@ export class EditorUI {
     this.assetCategory.addEventListener('change', () => this.renderAssets());
     this.assetGrid = node('div', 'previs-asset-grid');
     this.assetGrid.id = 'layout-asset-catalog';
-    this.assetPanel.append(search, this.assetCategory, this.assetGrid);
+    this.characterGrid=node('div','previs-character-grid');this.characterGrid.id='layout-character-catalog';
+    this.assetPanel.append(search, this.assetCategory,node('h4','previs-subtitle','角色参考'),this.characterGrid, this.assetGrid);
     left.append(tabs, this.outlinerPanel, this.assetPanel);
 
     const center = node('section', 'previs-center');
@@ -123,6 +128,14 @@ export class EditorUI {
     this.toolbar.append(action('聚焦 F', () => api.focus(), 'layout-focus'));
     this.viewButton = action('自由视角', () => api.toggleView(), 'layout-view-mode');
     this.toolbar.append(this.viewButton, action('当前视角 → 机位', () => api.captureCamera(), 'layout-capture-camera'));
+    this.cameraTools=node('div','previs-camera-tools');
+    for(const [id,label,glyph,run] of [
+      ['layout-new-camera','新建相机','camera',()=>api.newCamera()],
+      ['layout-pilot-camera','进入所选相机','camera',()=>api.pilotCamera()],
+      ['layout-exit-camera','脱离相机','exit',()=>api.exitCamera()],
+      ['layout-create-rail','导轨相机','rail',()=>api.createRail(true)],
+      ['layout-edit-spline','编辑样条','rail',()=>api.createRail(false)]
+    ]){const button=action(label,run,id);button.prepend(icon(glyph));this.cameraTools.append(button);}
     this.viewport = node('div', 'previs-viewport');
     this.viewport.id = 'layout-viewport';
     this.thirds = node('div', 'previs-thirds');
@@ -145,7 +158,7 @@ export class EditorUI {
     this.quality.append(...choices([{id:'simple',label:'简单渲染'},{id:'quality',label:'质量渲染'}], 'quality'));
     this.quality.addEventListener('change', () => api.viewport('renderMode', this.quality.value));
     viewOptions.append(this.quality, node('span','previs-navigation-help','右键 + WASD / QE · 中键平移 · Alt 左键环绕'));
-    center.append(this.toolbar, this.viewport, viewOptions);
+    center.append(this.toolbar,this.cameraTools, this.viewport, viewOptions);
 
     this.details = node('aside', 'previs-details');
     this.details.id = 'layout-properties';
@@ -177,6 +190,7 @@ export class EditorUI {
     const query = document.getElementById('layout-asset-search').value.toLowerCase();
     const category = this.assetCategory.value;
     this.assetGrid.replaceChildren();
+    this.renderCharacters();
     this.catalogs.assets.filter(item => (category === 'all' || item.category === category) && (!query || (item.label + ' ' + item.description).toLowerCase().includes(query))).forEach(item => {
       const button = action('', () => this.api.addAsset(item.id), '', 'previs-asset');
       button.dataset.assetType = item.id;
@@ -187,6 +201,17 @@ export class EditorUI {
       button.append(image, node('span', '', item.label));
       this.assetGrid.append(button);
     });
+  }
+
+  renderCharacters() {
+    this.characterGrid.replaceChildren();
+    const characters=this.api.characters();
+    for(const character of characters){
+      const button=action('',()=>this.api.addCharacter(character),'','previs-asset');button.dataset.characterId=character.character_id;
+      const image=node('img');image.src=character.image_url;image.alt='';
+      button.title='加入真实图片参考与可摆姿势代理；不代表精确三维重建';button.append(image,node('span','',character.name));this.characterGrid.append(button);
+    }
+    if(!characters.length)this.characterGrid.append(node('p','previs-help','在画板角色库保存角色后，可在此调用。'));
   }
 
   renderOutliner(scene, selection) {
@@ -270,10 +295,11 @@ export class EditorUI {
       else input.value = typeof value === 'number' ? Math.round(value * 1000) / 1000 : value ?? '';
       if (input.type === 'number') { input.step = options.step ?? .01; input.min = options.min ?? -10000; input.max = options.max ?? 10000; }
     }
+    const commit=next=>{if(options.change) options.change(next); else this.api.property(targetId,property,next);};
     input.addEventListener('change', () => {
       if (!input.reportValidity()) return;
       const next = input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value;
-      if(options.change) options.change(next); else this.api.property(targetId,property,next);
+      commit(next);
     });
     const actions = node('div','previs-property-actions');
     if (options.reset !== undefined) actions.append(iconAction('reset','重置这项属性',() => options.change ? options.change(options.reset) : this.api.property(targetId,property,options.reset)));
@@ -282,7 +308,7 @@ export class EditorUI {
       key.title = `为${label}添加关键帧`;
       actions.append(key);
     }
-    row.append(title,input,actions);
+    row.append(title,input.type==='number'?numericControl(input,this.api,commit):input,actions);
     return row;
   }
 
@@ -304,6 +330,7 @@ export class EditorUI {
     this.details.replaceChildren();
     const object = scene.objects.find(item => item.id === selection.at(-1));
     this.details.append(node('h3','previs-detail-title',selection.length > 1 ? `已选 ${selection.length} 个对象` : object?.label || '拍摄相机与环境'));
+    this.details.append(node('p','previs-control-hint','数值左右拖动 · 中键倍率阶梯 · 双击输入 · K 记录当前时间'));
     if (object) {
       this.details.append(this.field(object.id,'label','名称',object.label,{type:'text',key:false}));
       const transforms = this.section('变换');
@@ -321,7 +348,11 @@ export class EditorUI {
         light.append(this.field(object.id,'light.color','颜色',object.light?.color||'#ffffff',{type:'color',reset:'#ffffff'}),this.field(object.id,'light.intensity','强度',object.light?.intensity??3,{min:0,max:1000,reset:3}));
         this.details.append(light);
       }
-      if (object.type === 'camera') this.details.append(this.field(object.id,'focal','焦距 · mm',object.focal||35,{min:12,max:300,step:1,reset:35}));
+      if (object.type === 'camera') {
+        const controls=node('div','previs-detail-toolbar');controls.append(action('进入这台相机',()=>this.api.pilotCamera(object.id)),action('作为拍摄机位',()=>this.api.useCamera(object.id)));
+        this.details.append(controls,this.field(object.id,'focal','焦距 · mm',object.focal||35,{min:12,max:300,step:1,reset:35}));
+      }
+      if(object.reference){const reference=node('div','previs-reference-card'),image=node('img');image.src=object.reference.image_url;image.alt=object.reference.name||'角色参考';reference.append(image,node('p','',`${object.reference.name||'角色参考'} · ${object.reference.kind==='proxy'?'可摆姿势代理，不是精确三维重建':'原始图片参考板'}。身份与原始素材将随场景保存。`));this.details.append(reference);}
       if (object.type !== 'group' && object.type !== 'camera' && !object.type.endsWith('_light')) {
         const material = this.section('基础材质',false);
         material.append(this.field(object.id,'material.color','颜色',object.material?.color || object.color || '#94aecb',{type:'color',reset:'#94aecb'}));
@@ -333,10 +364,11 @@ export class EditorUI {
     camera.append(this.field('camera','focal','焦距 · mm',scene.camera.focal,{min:12,max:300,step:1,reset:35,id:'layout-focal'}),this.vector('camera','position','机位 · 米',scene.camera.position,[4.8,2.6,7.5]));
     const angles = this.api.cameraAngles(scene.camera);
     ['俯仰','水平','滚转'].forEach((label,i) => camera.append(this.field('camera','quaternion',label+' · 度',angles[i],{step:1,reset:0,keyProperty:'quaternion',id:'layout-camera-angle-'+i,change:value=>this.api.cameraAngle(i,value)})));
-    const rail = this.section('相机轨道',false);
+    const rail = this.section('相机轨道',false);rail.id='layout-rail-details';
+    rail.append(node('p','previs-help','在自由视口直接拖动蓝色轨道点。轨道进度可 K 帧；导轨相机会沿样条移动。'));
     rail.append(this.field('camera','rail.enabled','启用轨道',!!scene.camera.rail?.enabled,{reset:false}),this.field('camera','rail.progress','轨道进度',scene.camera.rail?.progress || 0,{min:0,max:1,step:.01,reset:0}),this.field('camera','rail.orientation','朝向',scene.camera.rail?.orientation || 'target',{choices:[{id:'target',label:'朝向目标'},{id:'tangent',label:'沿轨道前进'}],reset:'target'}));
     rail.append(this.vector('camera','rail.lookAt','看向目标',scene.camera.rail?.lookAt || [0,1,0],[0,1,0]));
-    rail.append(action('用当前视角加轨道点',()=>this.api.railPoint(),'layout-rail-add'));
+    const railActions=node('div','previs-detail-toolbar');railActions.append(action('添加当前视角点',()=>this.api.railPoint(),'layout-rail-add'),action('聚焦路线',()=>this.api.focusRail(),'layout-rail-focus'));rail.append(railActions);
     const points = node('div','previs-rail-points');
     (scene.camera.rail?.points || []).forEach((point,i) => {
       const line=node('div','previs-rail-row');

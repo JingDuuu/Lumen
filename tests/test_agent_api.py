@@ -49,6 +49,27 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(self.client.get(discovered["guide"]).get_json()["format"], "markdown")
         self.assertIn("items", self.client.get(discovered["examples"]["board"]).get_json())
 
+    def test_weighted_curve_metadata_roundtrips_and_invalid_components_reject(self):
+        scene = {"version": 3, "objects": [{"id": "actor", "type": "chair"}],
+                 "sequence": {"duration": 5, "fps": 24, "tracks": [
+                     {"targetId": "actor", "property": "position", "keys": [
+                         {"time": 0, "value": [0, 0, 0], "curves": {"0": {"mode": "break", "out": {"dt": .5, "dv": 2}}}},
+                         {"time": 5, "value": [5, 0, 0]}]}]}}
+        payload = {"request_id": "curve-scene", "document": {"name": "Curve", "kind": "scene", "scene": scene}}
+        response = self.client.post("/api/agent/documents", json=payload)
+        self.assertEqual(response.status_code, 200, response.get_json())
+        for property_name, curves in (("position", {"missing": {"mode": "auto"}}),
+                                      ("position", {"0": {"mode": "break", "out": {"dt": -1, "dv": 2}}}),
+                                      ("position", {"0": {"mode": "unknown"}}),
+                                      ("visible", {"": {"mode": "auto"}}),
+                                      ("position", None)):
+            bad = copy.deepcopy(scene)
+            track = bad["sequence"]["tracks"][0]
+            track["property"] = property_name
+            track["keys"][0]["curves"] = curves
+            with self.subTest(curves=curves), self.assertRaises(agent_api.AgentError):
+                agent_api.validate_scene(bad)
+
     def test_optimistic_write_and_idempotent_retry_preserve_newer_edits(self):
         first = {"board": self.board, "expected_revision": self.current()["revision"], "request_id": "first-write"}
         saved = self.client.put("/api/agent/board", json=first)

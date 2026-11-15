@@ -64,7 +64,7 @@ class ReferenceTests(unittest.TestCase):
         compiled = self.compiled()
         self.assertEqual(compiled["model_mode"], "ref2va")
         prompt = compiled["compiled_prompt"]
-        for fragment in ("<Picture 1>", "<Video 1>", "<Audio 1>", "正侧背三视图", "同一人物身份组", "后者参考前者的动作", "黑色短发"):
+        for fragment in ("<Picture 1>", "<Video 1>", "<Audio 1>", "正侧背三视图", "<Subject 1>", "<Subject 1> 的动作参考 <Video 1>", "黑色短发"):
             self.assertIn(fragment, prompt)
         self.assertEqual(compiled["input_manifest"][1]["item_id"], "person")
         self.assertEqual(compiled["connection_manifest"][0]["from_tag"], "<Video 1>")
@@ -168,7 +168,7 @@ class ReferenceTests(unittest.TestCase):
         with patch.object(core, "comfy_get", side_effect=AssertionError("GPU")), patch.object(refs, "prepare_video", side_effect=AssertionError("Unexpected transcode")):
             result = tasks.estimate([self.text, self.picture, self.video], self.params, self.connections, self.zones)
         self.assertEqual(result["model_mode"], "ref2va")
-        self.assertIn("后者参考前者的动作", result["compiled_prompt"])
+        self.assertIn("<Subject 1> 的动作参考 <Video 1>", result["compiled_prompt"])
         self.assertEqual(result["input_manifest"][2]["video"]["frame_count"], 39)
         self.assertIsNone(result["estimate_seconds"])
 
@@ -204,8 +204,12 @@ class ReferenceTests(unittest.TestCase):
         first = dict(second, id="first", shot_order=1)
         text = dict(self.text, role="storyboard", content="从大全景推到人物近景", shot_order=3)
         compiled = self.compiled([second, first, text], connections=[], zones=[dict(id="boards", name="分镜", purpose="storyboard", slot=3)])
-        self.assertIn("分镜参考顺序：<Picture 2> → <Picture 1> → [文字1]", compiled["compiled_prompt"])
-        self.assertIn("不生成拼贴或分镜边框", compiled["compiled_prompt"])
+        self.assertIn("<Picture 1>：参考分镜", compiled["compiled_prompt"])
+        self.assertIn("镜头顺序 2", compiled["compiled_prompt"])
+        self.assertIn("镜头顺序 1", compiled["compiled_prompt"])
+        self.assertIn("镜头 3", compiled["compiled_prompt"])
+        self.assertNotIn("[文字", compiled["compiled_prompt"])
+        self.assertIn("成片不出现分镜边框、文字标注或拼贴", compiled["compiled_prompt"])
         self.assertEqual(compiled["input_manifest"][0]["item_id"], "second")
         for value in (0, 101, True, 1.5, "2"):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "分镜序号"):

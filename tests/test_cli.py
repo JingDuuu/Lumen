@@ -14,6 +14,14 @@ import lumen
 
 class CliTests(unittest.TestCase):
     def setUp(self):
+        runtime = tempfile.TemporaryDirectory()
+        self.addCleanup(runtime.cleanup)
+        for name, filename in (("PYTHONW", "pythonw.exe"), ("DESKTOP", "desktop.py")):
+            entry = Path(runtime.name) / filename
+            entry.touch()
+            patched = patch.object(lumen, name, entry)
+            patched.start()
+            self.addCleanup(patched.stop)
         self.output = io.StringIO()
         self.capture = redirect_stdout(self.output)
         self.capture.__enter__()

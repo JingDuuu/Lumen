@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = {
     '.gitignore', '.gitattributes', 'LICENSE', 'README.md', 'CHANGELOG.md', 'PORTABLE_INSTALL.md',
     'app.py', 'desktop.py', 'engine_runtime.py', 'runtime_config.py', 'lumen_core.py',
-    'tasks.py', 'reference_inputs.py', 'asset_presets.py', 'agent_api.py', 'model_manager.py',
+    'agent_jobs.py', 'lumen_mcp.py', 'Lumen-MCP.cmd', 'tasks.py', 'reference_inputs.py', 'prompt_compiler.py', 'asset_presets.py', 'agent_api.py', 'model_manager.py',
     'previs_store.py', 'previs_render.py', 'format_bridge.py', 'blender_bridge.py',
     'lumen.py', 'lumen.bat', 'download_ref2va.py', 'install_desktop.ps1',
     'setup.ps1', 'Setup-Lumen.cmd', 'Start-Lumen.cmd', 'Install-H3.cmd',

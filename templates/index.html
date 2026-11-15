@@ -6,19 +6,42 @@
     <meta name="color-scheme" content="dark" />
     <title>Lumen · 流光视频工作室</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/style.css?v=20261025-spatial" />
+    <link rel="stylesheet" href="/static/style.css?v=20261113-agent-board-v1" />
     <link rel="stylesheet" href="/static/layout.css?v=20261025" />
-    <link rel="stylesheet" href="/static/preset-library.css?v=20261026" />
+    <link rel="stylesheet" href="/static/layout-controls.css?v=20261026" />
+    <link rel="stylesheet" href="/static/layout-sequence.css?v=20261026" />
+    <link
+      rel="stylesheet"
+      href="/static/preset-library.css?v=20261113-agent-board-v1"
+    />
+    <link
+      rel="stylesheet"
+      href="/static/gallery-workspace.css?v=20261113-agent-board-v1"
+    />
     <link rel="stylesheet" href="/static/model-setup.css?v=20261026-portable" />
-    <script src="/static/app.js?v=20261025-spatial" defer></script>
+    <link rel="stylesheet" href="/static/board-dashboard.css?v=20261113" />
+    <link rel="stylesheet" href="/static/agent-connect.css?v=20261113" />
+    <script src="/static/app.js?v=20261113-agent-board-v1" defer></script>
+    <script
+      src="/static/gallery-workspace.js?v=20261113-agent-board-v1"
+      defer
+    ></script>
     <script type="importmap">
       { "imports": { "three": "/static/vendor/three/three.module.js" } }
     </script>
-    <script type="module" src="/static/layout.js?v=20261025-spatial"></script>
-    <script type="module" src="/static/preset-library.js?v=20261026"></script>
+    <script src="/static/board-dashboard.js?v=20261113" defer></script>
+    <script src="/static/agent-connect.js?v=20261113" defer></script>
+    <script
+      type="module"
+      src="/static/layout.js?v=20261113-agent-board-v1"
+    ></script>
+    <script
+      type="module"
+      src="/static/preset-library.js?v=20261113-agent-board-v1"
+    ></script>
     <script src="/static/model-setup.js?v=20261026-portable" defer></script>
   </head>
-  <body>
+  <body class="gallery-mode">
     <svg
       class="icon-definitions"
       xmlns="http://www.w3.org/2000/svg"
@@ -172,6 +195,9 @@
           <use href="#icon-info" />
         </svg>
       </button>
+      <button id="agent-connect-open" class="btn" aria-label="连接 Agent" title="复制聊天启动提示词与本机 MCP 配置">
+        <svg class="icon" aria-hidden="true"><use href="#icon-link" /></svg>连接 Agent
+      </button>
     </header>
     <div class="app-shell">
       <nav class="rail" aria-label="工作区">
@@ -236,8 +262,8 @@
           <div class="board-column">
             <div class="page-heading">
               <div class="workspace-title">
-                <h1>创作画板</h1>
-                <span class="workspace-note">分类参考，组织镜头</span>
+                <h1>镜头图版</h1>
+                <span class="workspace-note">选好角色与场景，写下这一镜</span>
               </div>
               <div
                 class="heading-actions"
@@ -679,13 +705,7 @@
                   <span id="estimate-badge" class="muted">尚未检查</span>
                 </div>
                 <div id="estimate-detail">
-                  <p class="muted">先检查输入和计算规模，再开始生成。</p>
-                </div>
-                <div id="expensive-confirm" class="check-row" hidden>
-                  <input type="checkbox" id="confirm-expensive" /><label
-                    for="confirm-expensive"
-                    >已了解高计算成本，仍使用此配置</label
-                  >
+                  <p class="muted">开始生成时自动检查素材和参数。</p>
                 </div>
               </section>
               <section
@@ -715,8 +735,15 @@
                   <use href="#icon-chevron-right" />
                 </svg>
               </button>
+              <section
+                id="generation-progress"
+                class="generation-progress"
+                aria-label="当前生成进度"
+                aria-live="polite"
+                hidden
+              ></section>
               <button class="btn primary generate-btn" id="generate">
-                检查并预估
+                开始生成镜头
               </button>
               <p class="submit-note">成片、画板与配置，一起留在素材库。</p>
             </div>

@@ -168,6 +168,27 @@
   width: 100%;
   margin-top: 12px;
 }
+.gallery-mode .preset-library-grid {
+  display: block;
+  columns: 3 280px;
+  column-gap: 20px;
+}
+.gallery-mode .reference-preset-card {
+  display: inline-block;
+  width: 100%;
+  break-inside: avoid;
+  margin-bottom: 20px;
+}
+.gallery-mode .preset-preview {
+  height: auto;
+  min-height: 170px;
+  max-height: 380px;
+}
+.gallery-mode .preset-preview img,
+.gallery-mode .preset-preview video {
+  height: auto;
+  max-height: 380px;
+}
 @media (max-width: 700px) {
   .preset-library-dialog {
     width: calc(100vw - 20px);

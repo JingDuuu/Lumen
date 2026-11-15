@@ -32,3 +32,7 @@ diagnostics/
 .ruff_cache/
 .DS_Store
 Thumbs.db
+
+# Generated per-machine agent connection details
+agent-start-here.txt
+lumen-mcp-config.local.json

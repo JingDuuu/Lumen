@@ -8,23 +8,21 @@ import subprocess
 import threading
 
 import av
+import prompt_compiler
 from imageio_ffmpeg import get_ffmpeg_exe
 
 REFERENCE_ROLES = {"character", "scene", "action", "camera", "style", "layout", "storyboard", "audio", "general"}
 CHARACTER_VIEWS = {"general", "front", "side", "back", "three_view", "detail"}
 KEYFRAME_ROLES = {"first_frame", "last_frame", "middle_frame_1", "middle_frame_2", "middle_frame_3"}
-ROLE_TEXT = {"character": "保持人物身份、脸部特征、发型和服装一致", "scene": "参考场景、空间与环境",
-             "action": "参考动作、姿态与运动节奏", "camera": "参考机位、景别与运镜",
-             "style": "参考视觉风格、光线和色彩", "layout": "遵循构图、人物站位、空间比例与镜头关系",
-             "storyboard": "参考分镜的构图、景别、人物走位和镜头节奏，成片不要出现分镜边框、标注文字或拼贴",
-             "audio": "参考声音、音色与节奏", "general": "依据画面内容与下述说明使用此参考"}
-VIEW_TEXT = {"front": "正面", "side": "侧面", "back": "背面", "three_view": "同一人物的正侧背三视图",
-             "detail": "人物局部细节", "general": "人物参考"}
 EDGE_TEXT = {"reference": "使用前者作为后者的参考", "character_consistency": "保持前后两者人物身份一致",
              "style_inherit": "后者继承前者的视觉风格", "action_reference": "后者参考前者的动作与运动",
              "camera": "后者参考前者的机位与运镜", "continuation": "后者延续前者的动作与时空关系",
              "association": "将两者作为同一镜头中相互关联的内容"}
 _MEDIA_LOCK = threading.Lock()
+
+
+def is_enabled(item):
+    return item.get("enabled", True) and item.get("asset_enabled", True)
 
 
 def normalize_zones(zones=None):
@@ -40,7 +38,7 @@ def normalize_zones(zones=None):
         normal["purpose"] = "general" if zone.get("purpose", "general") == "free" else zone.get("purpose", "general")
         if normal["purpose"] not in REFERENCE_ROLES:
             raise ValueError("不支持的分区用途")
-        for key in ("name", "notes"):
+        for key in ("name", "notes", "description"):
             if key in zone and (not isinstance(zone[key], str) or len(zone[key]) > 2000):
                 raise ValueError("分区名称与说明须为文本，最多2000字")
         for key in ("x", "y", "w", "h"):
@@ -61,6 +59,11 @@ def validate_metadata(item):
         raise ValueError("不支持的人物视角")
     if item.get("zone_id") is not None and (not isinstance(item["zone_id"], str) or len(item["zone_id"]) > 200):
         raise ValueError("卡片分区ID格式不正确")
+    for key in ("character_id", "asset_id", "preset_id", "speaker_id", "character_name", "asset_name", "preset_name"):
+        if item.get(key) is not None and (not isinstance(item[key], str) or len(item[key]) > 200):
+            raise ValueError("角色、资产与说话人标识须为不超过200字的文本")
+    if item.get("audio_type", "ambience") not in {"dialogue", "sfx", "music", "ambience"}:
+        raise ValueError("声音类型须为台词、音效、音乐或环境声")
     if "layout" in item and (not isinstance(item["layout"], dict) or len(json.dumps(item["layout"]).encode("utf-8")) > 20 * 1024 * 1024):
         raise ValueError("构图元数据须为JSON对象且不超过20MB")
     if item.get("shot_order") is not None and (isinstance(item["shot_order"], bool) or not isinstance(item["shot_order"], int) or not 1 <= item["shot_order"] <= 100):
@@ -69,6 +72,8 @@ def validate_metadata(item):
         raise ValueError("视频声音开关须为布尔值")
     if "enabled" in item and not isinstance(item["enabled"], bool):
         raise ValueError("卡片参与开关须为布尔值")
+    if "asset_enabled" in item and not isinstance(item["asset_enabled"], bool):
+        raise ValueError("资产参与开关须为布尔值")
 
 
 def probe_video(path):
@@ -117,7 +122,7 @@ def video_plan(path, item, width, height, output_frames):
     vh = max(32, math.floor(info["height"] * scale / 32) * 32)
     return dict(start_seconds=start, requested_duration=requested, effective_duration=frames / 24,
                 frames=frames, frame_count=frames, fps=24, width=vw, height=vh, source_duration=info["duration"],
-                has_audio=info["has_audio"], include_audio=item.get("include_audio", True) and info["has_audio"])
+                has_audio=info["has_audio"], include_audio=item.get("include_audio", False) and info["has_audio"])
 
 
 def prepare_video(input_dir, filename, plan):
@@ -162,7 +167,7 @@ def prepare_video(input_dir, filename, plan):
 def compile_board(items, params, zones, connections, input_dir, output_frames, text_labels):
     zones = normalize_zones(zones)
     zone_map = {zone["id"]: zone for zone in zones}
-    media = [item for item in items if item["kind"] in {"image", "video"} and item.get("enabled", True)]
+    media = [item for item in items if item["kind"] in {"image", "video"} and is_enabled(item)]
     for item in items:
         validate_metadata(item)
         if item.get("zone_id") and item["zone_id"] not in zone_map:
@@ -187,29 +192,31 @@ def compile_board(items, params, zones, connections, input_dir, output_frames, t
     videos = [item for item in media if item["kind"] == "video"]
     if mode == "ref2va" and (len(pictures) > 9 or len(videos) > 3):
         raise ValueError("Ref2VA最多读取9张参考图和3段参考视频，请减少素材")
-    manifest, descriptions, fields, labels = [], [], {key: [] for key in text_labels}, {}
-    text_number = picture_number = video_number = audio_number = 0
+    manifest, fields, labels = [], {key: [] for key in text_labels}, {}
+    picture_number = video_number = audio_number = 0
     occupied = {item.get("role") for item in pictures if item.get("role") in {"first_frame", "last_frame"}}
     missing = [role for role in ("first_frame", "last_frame") if role not in occupied]
-    for item in items:
-        entry = dict(item_id=item.get("id"), kind=item["kind"], role=item.get("role"), included=True,
+    for index, item in enumerate(items):
+        entry = dict(item_id=item.get("id") or f"entry-{index}", kind=item["kind"], role=item.get("role"), included=True,
                      reference_role=item.get("reference_role", "general"), zone_id=item.get("zone_id"),
                      description=item.get("description", ""), notes=item.get("notes", ""),
                      character_view=item.get("character_view", "general"), shot_order=item.get("shot_order"))
-        if not item.get("enabled", True):
-            entry.update(included=False, reason="已停用", file=item.get("file"), tag=None)
+        for key in ("character_id", "asset_id", "preset_id", "character_name", "asset_name", "audio_type", "speaker_id"):
+            if key in item:
+                entry[key] = item[key]
+        if not entry.get("asset_name") and item.get("preset_name"):
+            entry["asset_name"] = item["preset_name"]
+        if not is_enabled(item):
+            entry.update(included=False, reason="资产未加入当前镜头" if not item.get("asset_enabled", True) else "已停用", file=item.get("file"), tag=None)
             manifest.append(entry)
             continue
         if item["kind"] == "text":
-            text_number += 1
-            entry["tag"] = f"[文字{text_number}]"
+            entry["tag"] = None
             entry["content"] = item.get("content", "").strip()
-            if not entry["content"]:
-                if not entry["description"].strip() and not entry["notes"].strip():
-                    entry.update(included=False, reason="空白文字")
-            else:
+            if not entry["content"] and not entry["description"].strip() and not entry["notes"].strip():
+                entry.update(included=False, reason="空白文字")
+            elif entry["content"]:
                 fields[item["role"]].append(entry["content"])
-                descriptions.append(f"{entry['tag']} {text_labels[item['role']]}：{entry['content']}")
         else:
             entry["file"] = item["file"]
             if mode == "ref2va":
@@ -223,9 +230,6 @@ def compile_board(items, params, zones, connections, input_dir, output_frames, t
                     if entry["video"]["include_audio"]:
                         audio_number += 1
                         entry["audio_tag"] = f"<Audio {audio_number}>"
-                descriptions.append(f"{entry['tag']}：{ROLE_TEXT[entry['reference_role']]}。")
-                if entry.get("audio_tag"):
-                    descriptions.append(f"{entry['audio_tag']} 是 {entry['tag']} 的同期声音，可参考声音、音色与节奏。")
             else:
                 role = item.get("role")
                 if role == "auto":
@@ -234,24 +238,8 @@ def compile_board(items, params, zones, connections, input_dir, output_frames, t
                     role = missing.pop(0)
                 frame = 0 if role == "first_frame" else output_frames - 1 if role == "last_frame" else round((output_frames - 1) * int(role[-1]) / 4)
                 entry.update(role=role, frame_index=frame, tag=f"[第{frame}帧图片]")
-                descriptions.append(f"{entry['tag']}：在视频第{frame/24:.2f}秒处遵循此图像约束。")
-            if entry["reference_role"] == "character":
-                descriptions.append(f"{entry['tag']} 人物视角：{VIEW_TEXT[entry['character_view']]}。")
-        for key in ("description", "notes"):
-            if entry[key].strip():
-                descriptions.append(f"{entry['tag']} 说明：{entry[key].strip()}")
         manifest.append(entry)
-        if item.get("id"):
-            labels[item["id"]] = entry["tag"]
-    for zone in zones:
-        members = [entry["tag"] for entry in manifest if entry["zone_id"] == zone["id"] and entry["included"]]
-        if members:
-            purpose = "同一人物身份组；不同视角表现同一个人物" if zone["purpose"] == "character" else ROLE_TEXT[zone["purpose"]]
-            descriptions.append(f"分区「{zone.get('name', zone['id'])}」：{'、'.join(members)}。{purpose}。{zone.get('notes', '')}")
-    storyboard = [entry for entry in manifest if entry["included"] and (entry["reference_role"] == "storyboard" or entry["role"] == "storyboard")]
-    storyboard.sort(key=lambda entry: entry["shot_order"] if entry["shot_order"] is not None else 101)
-    if storyboard:
-        descriptions.append("分镜参考顺序：" + " → ".join(entry["tag"] for entry in storyboard) + "。按此顺序理解镜头设计与动作衔接，不生成拼贴或分镜边框。")
+        labels[entry["item_id"]] = entry["tag"]
     included_ids = {entry["item_id"] for entry in manifest if entry["included"]}
     connection_manifest = []
     for edge in connections:
@@ -259,11 +247,13 @@ def compile_board(items, params, zones, connections, input_dir, output_frames, t
             connection_manifest.append(dict(id=edge["id"], included=False, reason="端点卡片已停用或为空"))
             continue
         label = edge.get("label", "association")
-        descriptions.append(f"关系：{labels[edge['from']]} → {labels[edge['to']]}；{EDGE_TEXT.get(label, label or EDGE_TEXT['association'])}。")
-        connection_manifest.append(dict(id=edge["id"], included=True, from_tag=labels[edge["from"]], to_tag=labels[edge["to"]], instruction=EDGE_TEXT.get(label, label)))
-    return dict(model_mode=mode, compiled_prompt="\n\n".join(descriptions), input_manifest=manifest,
-                fields={key: "\n".join(values) for key, values in fields.items()}, zones=zones,
-                connections=connections, connection_manifest=connection_manifest)
+        connection_manifest.append(dict(id=edge["id"], included=True, from_tag=labels[edge["from"]], to_tag=labels[edge["to"]],
+                                        from_item=edge["from"], to_item=edge["to"], instruction=EDGE_TEXT.get(label, label)))
+    result = dict(model_mode=mode, input_manifest=manifest,
+                  fields={key: "\n".join(values) for key, values in fields.items()}, zones=zones,
+                  connections=connections, connection_manifest=connection_manifest)
+    result.update(prompt_compiler.compose(manifest, items, zones, connections, params.get("audio_mode", "generated")))
+    return result
 
 
 def input_packet(compiled):
@@ -281,7 +271,8 @@ def input_packet(compiled):
             if entry.get("audio_tag"):
                 audio.append(dict(tag=entry["audio_tag"], video_tag=entry["tag"], socket=f"ref_video_audios.ref_video_audio_{len(videos)}"))
             videos.append(media)
-    return dict(model_mode=compiled["model_mode"], text=compiled["compiled_prompt"], images=images, videos=videos, audio=audio,
+    return dict(model_mode=compiled["model_mode"], audio_mode=compiled.get("audio_mode", "generated"),
+                prompt_format=compiled.get("prompt_format"), subjects=compiled.get("subjects", []), text=compiled["compiled_prompt"], images=images, videos=videos, audio=audio,
                 relationships=[entry for entry in compiled["connection_manifest"] if entry["included"]],
                 layout_metadata_sent=False,
                 explanation="H3接收下面的文字、图像像素和视频帧；3D场景、骨架和时间线JSON只用于继续编辑，导出图片或预演视频后才作为视觉参考。")

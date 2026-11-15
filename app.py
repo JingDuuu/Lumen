@@ -24,6 +24,7 @@ import format_bridge
 import previs_render
 import asset_presets
 import agent_api
+import agent_jobs
 import model_manager
 
 mimetypes.add_type("image/svg+xml", ".svg")
@@ -67,6 +68,10 @@ def stop_services():
     format_bridge.shutdown_jobs()
     tasks.manager.stop()
     tasks.manager.interrupt_records()
+
+
+app.register_blueprint(agent_jobs.create_blueprint(board_path=lambda: BOARD_FILE, board_lock=_BOARD_LOCK,
+                                                  start_services=lambda: start_services()))
 
 
 def json_object():
@@ -116,7 +121,7 @@ def favicon():
 @app.route("/api/system")
 def api_system():
     running = core.comfyui_running()
-    info = {"comfyui_running": running, "version": "4.1.1", "desktop": bool(app.config.get("DESKTOP_CLOSE")),
+    info = {"comfyui_running": running, "version": "4.3.0", "desktop": bool(app.config.get("DESKTOP_CLOSE")),
             "model": "MiniMax H3 · FL2VA / Ref2VA INT8", "capabilities": tasks.CAPABILITIES, "models": core.model_status(),
             "progress_connected": tasks.manager.ready.is_set(), "engine": engine_runtime.state()}
     if running:

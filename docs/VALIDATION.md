@@ -1,30 +1,44 @@
-# 4.1.0 validation — 2026-10-26
+# Lumen 4.3.0 validation
 
-Patch 4.1.1 normalizes Windows 8.3 temporary-directory aliases in installation tests; application workflows are unchanged.
+Evidence distinguishes isolated editor/API checks from real local inference. Screenshots in
+this repository use synthetic fixtures. Personal references, videos and diagnostics are excluded.
 
-Evidence below distinguishes measured behavior from untested combinations. Tests use temporary data and synthetic references. The public repository does not contain private boards, output videos or raw local diagnostic logs.
+## Local verification
 
-## Checked locally
+- Standalone source checkout on Windows x64 / Python 3.10: 185 Python tests completed with no failures (one optional pre-generated export fixture was unavailable). This includes
+  agent request idempotency, preset masks, file verification, real stdio MCP and CLI transport,
+  plus local Blender conversions when Blender is available.
+- The complete Node scene/rig/rail/curve suite passed 50 checks. Real Edge: 17 gallery, 6 agent-board, 12 Previs, 8 direct-control, 9 curve/timeline,
+  5 file-workflow and 5 onboarding groups passed. Fixtures use temporary data and mocked
+  inference, never the user's board or GPU queue.
+- Weighted curves participate in playback and GLB export; a modified sample of 2.416517970
+  decoded from GLB as 2.416517973, within Float32 precision. Alt-wheel zoom preserved the time
+  under the cursor.
+- The normal desktop entry, CLI from another working directory, live engine readiness and
+  native “Connect Agent” panel were checked on the development machine.
 
-- Python regression suite: 131 tests passed on Windows x64 / Python 3.10. This includes actual Blender format conversion when Blender is installed.
-- Scene/model/rail math: 38 Node tests passed.
-- Real Edge browser checks: 14 board interaction groups, 16 reference-space groups, 12 Previs groups, 5 file-workflow groups, 9 preset-library groups and 5 model-onboarding groups passed.
-- Real CLI → isolated HTTP: 10 groups passed, including multipart upload, preset ZIP roundtrip, version conflict/idempotency, animated Prefab, Unicode/BOM stdin, Chinese filenames, binary downloads and the ordinary Windows batch entry point. No GPU generation is triggered by these tests.
-- A separate source directory with a new virtual environment installed `requirements.txt` successfully. App import and system/model/discovery/board endpoints returned HTTP 200 without an engine or weights. `setup.ps1 -EditorOnly -NoShortcut` completed successfully with that environment.
-- The existing normal desktop shortcut opened version 4.1.0 with an owned ComfyUI process. A generation completed, and normal CLI close stopped the desktop and its owned engine. The original board's 8 cards, 1 connection, 6 zones and generation settings were unchanged.
+## Real generation
 
-## Actual video check
+On Ryzen 9 5950X / 128 GB RAM / RTX 3080 10 GB, an agent request with an existing character
+reference completed in **84 seconds**: 608×352, 8 steps, **124 decoded frames at 24 fps
+(5.167 seconds)** and one audio track. The result entered the ordinary Lumen library.
+A downloaded result matched the original file's SHA-256. Retrying the same request ID returned
+the original completed task; a real MCP connection returned its verified file resource.
+This is pipeline acceptance, not a quality guarantee or a performance promise for other GPUs.
 
-On an AMD Ryzen 9 5950X / 128 GB RAM / NVIDIA RTX 3080 10 GB host, a text-driven H3 FL2VA trial at 608 × 352, 8 sampling steps and seed 0 completed in **60 seconds** of application-reported task time. The output was independently decoded: **56 frames, 24 fps, 2.333333 seconds**, 608 × 352.
+## Other computers
 
-This is a small workflow acceptance test, not a quality benchmark or a promise for longer clips. It does not establish a speed ratio against RTX Spark, and it does not include a matched second-machine energy measurement.
+Standalone defaults resolve the application environment, engine, data and output folders
+relative to that installation. Bootstrap prompts and MCP configuration are generated from
+that computer's paths. Company installations must install their own runtime and weights or
+configure an existing compatible ComfyUI; private assets and results are not part of the source.
 
-## Limits of this release's validation
+The setup target and Windows CI use Python 3.12; local development uses Python 3.10. The complete
+60+ GB model download and fresh CUDA engine installation were not repeated for this release.
+File-size checks confirmed the existing five pinned models; full hash verification remains
+part of the explicit model installation flow. Windows on Arm / RTX Spark and other physical
+GPU configurations have not been tested here. Pure cloud chats still require a local bridge;
+video attachment support depends on the chat host.
 
-- The full 63.44 GB model pack was not downloaded again. Resume, cancellation, corruption handling, hashes and file locking were exercised with small test artifacts. Existing local H3 weights produced the actual trial above.
-- A fresh complete ComfyUI/CUDA installation was not repeated. The pinned engine revision is the revision used by the existing working installation. Fresh editor dependencies were installed separately.
-- Python 3.12 is the setup target and CI configuration; local acceptance used Python 3.10. Check the repository Actions result for the current CI outcome.
-- The first fresh-copy desktop attempt ran its local service but the status probe timed out before obtaining its complete response; it was then closed. A second fresh-copy native-window verification was blocked by automatic execution approval, with no specific reason provided. Full fresh-copy native-window acceptance is therefore not claimed.
-- Windows on Arm / RTX Spark, other GPU configurations, and every third-party FBX/ABC extension have not been tested on physical hardware.
-
-See [development instructions](DEVELOPMENT.md) to reproduce the isolated checks and [installation notes](../PORTABLE_INSTALL.md) for dependency boundaries.
+See [development checks](DEVELOPMENT.md), [installation](../PORTABLE_INSTALL.md) and
+[chat integration](AGENT_QUICKSTART.md) for reproduction and setup.

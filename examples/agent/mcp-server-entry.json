@@ -1,0 +1,5 @@
+{
+  "command": "<LUMEN_PYTHON_EXE>",
+  "args": ["-u", "<LUMEN_INSTALL_DIR>/lumen_mcp.py"],
+  "cwd": "<LUMEN_INSTALL_DIR>"
+}

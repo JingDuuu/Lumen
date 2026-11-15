@@ -1,0 +1,27 @@
+#agent-connect-open{display:flex;align-items:center;gap:7px;white-space:nowrap;min-height:40px;font-size:14px;padding:9px 13px}
+#agent-connect-open .icon{width:18px;height:18px}
+.agent-connect-dialog{color:#e5efff;background:linear-gradient(145deg,#1c3048f5,#101e33fa);border:1px solid #8fb5dd66;border-radius:24px;padding:26px 30px;width:min(820px,calc(100vw - 48px));max-height:calc(100dvh - 60px);overflow:auto;box-shadow:0 24px 100px #0008;backdrop-filter:blur(28px);scrollbar-width:thin}
+.agent-connect-dialog::backdrop{background:#020b18a1;backdrop-filter:blur(7px)}
+.agent-connect-heading,.agent-copy-heading{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.agent-connect-heading h2{font-size:25px;letter-spacing:-.02em;margin:0;font-weight:650}
+.agent-connect-close{border:0;background:#627e9e20;border-radius:50%;font-size:25px;width:38px;height:38px;color:#bad1ed;cursor:pointer}
+.agent-connect-intro{font-size:16px;line-height:1.85;margin:18px 0;color:#c6d8ef}
+.agent-connection-status{display:flex;flex-wrap:wrap;gap:9px;margin:17px 0}
+.agent-connection-status>span{padding:7px 11px;border:1px solid #adc7e02e;border-radius:20px;background:#87b5df0c;font-size:13px}
+.agent-connection-status .is-ready{color:#abdbd1;border-color:#7dc8b842}
+.agent-connection-status .is-pending{color:#abbdd7}
+.agent-endpoint,.agent-output-folder{font-size:14px;line-height:1.8;color:#a5bdd9;overflow-wrap:anywhere}
+.agent-connect-dialog code{font-size:13px;color:#d2e7ff}
+.agent-copy-panel{margin:22px 0 14px}
+.agent-copy-heading h3{font-size:18px;margin:0;font-weight:600}
+.agent-copy-heading .btn{font-size:14px;min-height:40px;padding:9px 13px}
+.agent-copy-panel textarea{width:100%;min-height:220px;resize:vertical;margin-top:13px;padding:16px 18px;line-height:1.8;font-size:14px;color:#cfe1f7;background:#081321b8;border:1px solid #8eb0d638;border-radius:12px;white-space:pre-wrap}
+.agent-config-details{border-top:1px solid #b2cae226;border-bottom:1px solid #b2cae226;padding:17px 0;margin:20px 0}
+.agent-config-details summary{font-size:16px;color:#c7e2ff;cursor:pointer;min-height:25px}
+.agent-config-details .agent-copy-panel{margin:12px 0}
+.agent-config-details textarea{font-family:ui-monospace,Consolas,monospace;font-size:13px;min-height:160px}
+.agent-muted,.agent-connection-boundary{font-size:14px;line-height:1.85;color:#9db5d2}
+.agent-connect-error{color:#f3b3b3;line-height:1.8}
+@media(max-width:1200px){.app-header{gap:14px}.header-project{flex:1;overflow:hidden;white-space:nowrap}.header-project .project-dot{display:none}.header-project #save-state{margin-left:0}.header-project{font-size:0}.header-project #save-state{font-size:13px}.engine-status{margin-left:auto}#agent-connect-open{padding:9px 11px}}
+@media(max-width:800px){#agent-connect-open{font-size:0;gap:0;padding:9px}.agent-connect-dialog{padding:22px;width:calc(100vw - 30px)}.agent-connect-heading h2{font-size:22px}.agent-copy-heading{flex-wrap:wrap}.agent-copy-panel textarea{min-height:200px}}
+@media(prefers-reduced-motion:no-preference){.agent-connect-dialog[open]{animation:agent-panel-open .18s ease-out}@keyframes agent-panel-open{from{opacity:0;transform:translateY(7px) scale(.988)}to{opacity:1;transform:translateY(0) scale(1)}}}
